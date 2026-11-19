@@ -145,6 +145,49 @@ test('executable discovery, post-update prompt guards, and relaunch scheduling p
   }
 });
 
+test('macOS relaunch script waits for ancestor Antigravity process without pgrep -f and passes debug port', () => {
+  const root = mkdtempSync(join(tmpdir(), 'agy-relaunch-mac-'));
+  try {
+    const appBundle = join(root, 'Antigravity.app');
+    const binDir = join(appBundle, 'Contents', 'Resources', 'bin');
+    mkdirSync(binDir, { recursive: true });
+    const lsExe = join(binDir, 'language_server');
+    writeFileSync(lsExe, '');
+
+    const spawned = [];
+    const res = scheduleRelaunchWithDebugPort({
+      dataDir: join(root, 'data'),
+      home: root,
+      platform: 'darwin',
+      env: { ANTIGRAVITY_AGENTAPI_EXE: lsExe, ELECTRON_RUN_AS_NODE: '1' },
+      spawnProcess(cmd, args, opts) { spawned.push({ cmd, args, opts }); return { unref() {} }; }
+    });
+
+    assert.equal(res.scheduled, true);
+    assert.equal(res.target, appBundle);
+    assert.equal(spawned.length, 1);
+    assert.equal(spawned[0].cmd, 'sh');
+    assert.equal(spawned[0].args[0], '-c');
+    assert.equal(spawned[0].opts.detached, true);
+    assert.equal(spawned[0].opts.env.ELECTRON_RUN_AS_NODE, undefined);
+    assert.equal(spawned[0].opts.env.AGY_RELAUNCH_TARGET, appBundle);
+
+    const script = spawned[0].args[1];
+    assert.ok(script.includes("trap '' HUP TERM"));
+    assert.ok(script.includes('/bin/ps -axo args='));
+    assert.ok(!script.includes('pgrep -f'));
+    assert.ok(script.includes('/usr/bin/open -n -a "$target" --args --remote-debugging-port=0 >/dev/null 2>&1'));
+    assert.ok(!script.includes('--remote-debugging-port=0 >/dev/null 2>&1 &'));
+
+    if (process.platform !== 'win32') {
+      const check = spawnSync('sh', ['-n', '-c', script], { encoding: 'utf8' });
+      assert.equal(check.status, 0, check.stderr);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Sidecar Aux Pane Web UI serves post-update prompt copy, enforces token auth, and triggers relaunch', async () => {
   const freePort = await new Promise((resolve, reject) => {
     const s = createServer();
