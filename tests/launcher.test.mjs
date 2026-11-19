@@ -14,7 +14,10 @@ import {
   restoreLaunchers,
   resolveAntigravityExecutable,
   shouldPromptPostUpdate,
-  scheduleRelaunchWithDebugPort
+  scheduleRelaunchWithDebugPort,
+  resolveLocalFilePath,
+  openLocalFile,
+  copyLocalFile
 } from '../lib/launcher.mjs';
 import { startSidecarWebUi, renderAuxPaneHtml } from '../lib/sidecar-ui.mjs';
 
@@ -184,5 +187,70 @@ test('Sidecar Aux Pane Web UI serves post-update prompt copy, enforces token aut
     assert.equal(relaunched, 1);
   } finally {
     await close();
+  }
+});
+
+test('resolveLocalFilePath parses file URIs and strips line/query fragments', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agy-file-uri-'));
+  try {
+    const file = join(dir, 'sample.md');
+    writeFileSync(file, 'hello', 'utf8');
+    const fileUri = new URL(`file:///${file.replace(/\\/g, '/').replace(/^([A-Za-z]:)/, '$1')}#L10-L20`).href;
+    assert.equal(resolveLocalFilePath(fileUri), file);
+    assert.throws(() => resolveLocalFilePath('https://example.com/a.md'), /仅支持本地文件链接/);
+    assert.throws(() => resolveLocalFilePath(''), /文件路径无效/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('openLocalFile dispatches platform commands for open and reveal', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agy-open-file-'));
+  try {
+    const file = join(dir, 'model.bbmodel');
+    writeFileSync(file, '{}', 'utf8');
+    const fileUri = new URL(`file:///${file.replace(/\\/g, '/')}`).href;
+    const calls = [];
+    const fakeSpawn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return { unref() {} };
+    };
+
+    openLocalFile(fileUri, { action: 'open', platform: 'win32', spawnProcess: fakeSpawn });
+    openLocalFile(fileUri, { action: 'reveal', platform: 'win32', spawnProcess: fakeSpawn });
+    openLocalFile(fileUri, { action: 'reveal', platform: 'darwin', spawnProcess: fakeSpawn });
+    openLocalFile(fileUri, { action: 'reveal', platform: 'linux', spawnProcess: fakeSpawn });
+
+    assert.deepEqual(calls[0], { cmd: 'explorer.exe', args: [file], opts: { detached: true, stdio: 'ignore' } });
+    assert.deepEqual(calls[1], { cmd: 'explorer.exe', args: [`/select,${file}`], opts: { detached: true, stdio: 'ignore' } });
+    assert.deepEqual(calls[2], { cmd: 'open', args: ['-R', file], opts: { detached: true, stdio: 'ignore' } });
+    assert.deepEqual(calls[3], { cmd: 'xdg-open', args: [dir], opts: { detached: true, stdio: 'ignore' } });
+    assert.throws(() => openLocalFile(fileUri, { action: 'delete', spawnProcess: fakeSpawn }), /不支持的文件操作/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('copyLocalFile dispatches platform clipboard commands', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agy-copy-file-'));
+  try {
+    const file = join(dir, 'mage.png');
+    writeFileSync(file, 'png', 'utf8');
+    const fileUri = new URL(`file:///${file.replace(/\\/g, '/')}`).href;
+    const calls = [];
+    const fakeSync = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return { status: 0 };
+    };
+
+    copyLocalFile(fileUri, { platform: 'win32', spawnSyncProcess: fakeSync, env: {} });
+    copyLocalFile(fileUri, { platform: 'darwin', spawnSyncProcess: fakeSync });
+
+    assert.equal(calls[0].cmd, 'powershell.exe');
+    assert.equal(calls[0].opts.env.AGY_CLIPBOARD_PATH, file);
+    assert.equal(calls[1].cmd, 'osascript');
+    assert.equal(calls[1].args.at(-1), file);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
