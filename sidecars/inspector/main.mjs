@@ -295,6 +295,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
         connected: Boolean(health.connected),
         enabled: current.enabled !== false,
         language: current.language || 'zh-CN',
+        platform: process.platform,
+        macLauncherApp: process.platform === 'darwin' ? join(paths.home, 'Applications', 'Antigravity (Powertools).app') : '',
         mode: remoteSsh ? 'ssh-remote' : 'local',
         manualCommand: remoteSsh ? '' : manualLaunchCommand({ home: paths.home }),
         update: updateStatus()

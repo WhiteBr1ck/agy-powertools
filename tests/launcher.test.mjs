@@ -44,6 +44,9 @@ test('Linux desktop launcher override patches and restores cleanly in sandbox', 
     const created = configureLaunchers({ home, dataDir, platform: 'linux', sandbox: true, systemApplicationsDir: sysApps });
     const userFile = join(home, '.local', 'share', 'applications', 'antigravity.desktop');
     assert.equal(created.updated.length, 1);
+    assert.equal(created.macApp, undefined);
+    assert.equal(created.iconConfigured, undefined);
+    assert.equal(existsSync(join(home, 'Applications', 'Antigravity (Powertools).app')), false);
     assert.match(readFileSync(userFile, 'utf8'), /Exec=\/opt\/Antigravity\/antigravity --remote-debugging-port=0 %U/);
 
     const restored = restoreLaunchers({ home, dataDir, platform: 'linux', sandbox: true });
@@ -63,14 +66,39 @@ test('Linux desktop launcher override patches and restores cleanly in sandbox', 
   }
 });
 
-test('macOS launcher app is created in ~/Applications and removed on restore', () => {
+test('macOS launcher app copies source icon when available, clears stale icon when absent, and removes on restore', () => {
   const root = mkdtempSync(join(tmpdir(), 'agy-launcher-mac-'));
   try {
     const home = join(root, 'home'), dataDir = join(root, 'data');
     const res = configureLaunchers({ home, dataDir, platform: 'darwin', sandbox: true });
     const appDir = join(home, 'Applications', 'Antigravity (Powertools).app');
+    const plistPath = join(appDir, 'Contents', 'Info.plist');
+    const iconPath = join(appDir, 'Contents', 'Resources', 'icon.icns');
     assert.equal(res.updated[0], appDir);
+    assert.equal(res.macApp, appDir);
+    assert.equal(res.iconConfigured, false);
+    assert.equal(existsSync(iconPath), false);
+    assert.equal(readFileSync(plistPath, 'utf8').includes('CFBundleIconFile'), false);
     assert.ok(readFileSync(join(appDir, 'Contents', 'MacOS', 'launcher'), 'utf8').includes('--remote-debugging-port=0'));
+
+    const sourceApp = join(home, 'Applications', 'Antigravity.app');
+    mkdirSync(join(sourceApp, 'Contents', 'Resources'), { recursive: true });
+    writeFileSync(join(sourceApp, 'Contents', 'Info.plist'), '<plist><dict><key>CFBundleIconFile</key><string>CustomIcon</string></dict></plist>', 'utf8');
+    writeFileSync(join(sourceApp, 'Contents', 'Resources', 'CustomIcon.icns'), 'FAKE_ICNS', 'utf8');
+
+    const withIcon = configureLaunchers({ home, dataDir, platform: 'darwin', sandbox: true });
+    assert.equal(withIcon.iconConfigured, true);
+    assert.equal(withIcon.macApp, appDir);
+    assert.equal(readFileSync(iconPath, 'utf8'), 'FAKE_ICNS');
+    assert.ok(readFileSync(plistPath, 'utf8').includes('<key>CFBundleIconFile</key><string>icon.icns</string>'));
+    assert.ok(readFileSync(join(appDir, 'Contents', 'MacOS', 'launcher'), 'utf8').includes(sourceApp));
+
+    rmSync(sourceApp, { recursive: true, force: true });
+    const withoutIcon = configureLaunchers({ home, dataDir, platform: 'darwin', sandbox: true });
+    assert.equal(withoutIcon.iconConfigured, false);
+    assert.equal(existsSync(iconPath), false);
+    assert.equal(readFileSync(plistPath, 'utf8').includes('CFBundleIconFile'), false);
+
     restoreLaunchers({ home, dataDir, platform: 'darwin', sandbox: true });
     assert.equal(existsSync(appDir), false);
   } finally {
@@ -270,6 +298,9 @@ test('Sidecar Aux Pane Web UI serves post-update prompt copy, enforces token aut
     assert.ok(html.includes('复制启动命令'));
     assert.ok(html.includes('检查插件更新'));
     assert.ok(html.includes('复制诊断信息'));
+    assert.ok(html.includes('id="mac-dock-hint"'));
+    assert.ok(html.includes("data.platform === 'darwin'"));
+    assert.ok(html.includes('拖入 Dock 栏替换原 Antigravity 图标'));
     assert.ok(html.includes('[hidden] { display: none !important; }'));
     assert.equal(html.includes('\u00b7'), false);
     const inlineScript = html.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
