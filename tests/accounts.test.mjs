@@ -237,6 +237,9 @@ test('quota tracker isolates cycle samples by accountKey without cross-account b
     const saved = JSON.parse(readFileSync(join(dir, 'quota-samples.json'), 'utf8'));
     assert.equal(saved.some(s => s.id === 'alpha@example.com::gemini-5h'), true);
     assert.equal(saved.some(s => s.id === 'beta@example.com::gemini-5h'), true);
+    assert.deepEqual(tracker.samples('alpha@example.com', now).map(s => s.resetTimeMs), [now + 3600_000]);
+    assert.deepEqual(tracker.samples('beta@example.com', now).map(s => s.resetTimeMs), [now + 7200_000]);
+    assert.deepEqual(tracker.samples('charlie@example.com', now), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -249,6 +252,7 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
     Fragment: 'fragment',
+    useId: () => 'tip-1',
     useState: init => {
       if (!componentStates.has(activeComponent)) componentStates.set(activeComponent, []);
       const states = componentStates.get(activeComponent);
@@ -264,6 +268,7 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
   const panelsCode = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
   const context = vm.createContext({
     React,
+    Intl,
     URL,
     window: { addEventListener() {}, removeEventListener() {} },
     document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} } },
@@ -285,20 +290,21 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     mT: 'select-menu',
     nT: 'select-item'
   });
-  vm.runInContext(`(() => { ${dashboardCode}\n${helperCode}\nglobalThis.__agyDashboard = { modelIdentity, dateRange, summarizeRequests, subscriptionIdentity, distributionModels }; globalThis.__agyAccounts = { quotaGroupMeta, accountBucketStatus, summarizeAccountQuota, formatRelativeTime, formatResetCountdown, formatCompactCountdown, accountInitials, selectAutoSwitchCandidate }; })();`, context);
+  vm.runInContext(`(() => { ${dashboardCode}\n${helperCode}\nglobalThis.__agyDashboard = { modelIdentity, timestampToMs, resolveWeeklyQuotaWindow, dateRange, summarizeRequests, subscriptionIdentity, distributionModels }; globalThis.__agyAccounts = { quotaGroupMeta, accountBucketStatus, summarizeAccountQuota, formatRelativeTime, formatResetCountdown, formatCompactCountdown, accountInitials, selectAutoSwitchCandidate }; })();`, context);
   vm.runInContext(panelsCode, context);
-  const currentOpts = { enabled: true, language: 'zh-CN', multiAccount: true, accountSwitcher: true, accountViewMode: 'list', accountQuotaWindow: '5h', autoSwitchAccount: false, ...opts };
+  const currentOpts = { enabled: true, language: 'zh-CN', overviewRange: 'weeklyQuota', multiAccount: true, accountSwitcher: true, accountViewMode: 'list', accountQuotaWindow: '5h', autoSwitchAccount: false, ...opts };
   const panels = context.__agyPanels({
-    version: '2.12.10',
+    version: '2.13.2',
     t: v => v,
     defaults: currentOpts,
     options: () => currentOpts,
     settingsError: () => '',
     state: () => ({ contextWindow: { maxTokens: 200000 } }),
     accounts: () => accountsData,
-    account: () => null,
+    account: () => hooks.account ?? null,
+    accountFetchedAt: () => hooks.accountFetchedAt ?? null,
     capabilities: () => ({ plan: 'Google AI Ultra', planId: 'g1-ultra-tier', email: 'alice@example.com', name: 'Alice Chen' }),
-    estimates: () => [],
+    estimates: () => hooks.estimates ?? [],
     subscribe: () => () => {},
     revision: () => 0,
     change: patch => { Object.assign(currentOpts, patch); hooks.onChange?.(patch); return Promise.resolve(); },
@@ -339,6 +345,7 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     return out;
   }
   return {
+    renderOverview: dashboard => { activeComponent = 'overview'; hookIdx = 0; return panels.Overview({ dashboard }); },
     renderSwitcher: () => { activeComponent = 'switcher'; hookIdx = 0; return panels.AccountSwitcher(); },
     renderQuotas: () => { activeComponent = 'quotas'; hookIdx = 0; return panels.Quotas(); },
     renderSettings: () => { activeComponent = 'settings'; hookIdx = 0; return panels.Settings(); },
@@ -522,4 +529,81 @@ test('AccountSwitcher, Quotas, and Settings implement master switch risk warning
   for (const banned of ['实时同步', '额度充裕', '部分限额接近耗尽', '切入后自动刷新最新额度', '5 小时已回满', '已重置（预计 100%）', '\u00b7']) {
     assert.equal(cardText.includes(banned), false, `Unexpected text: ${banned}`);
   }
+});
+
+
+test('Overview defaults to Current weekly quota (本轮周限额内用量), displays exact reset timestamps without middle dots, and exposes Settings control', () => {
+  const now = Date.now();
+  const resetSec = Math.floor((now + 6 * 86400_000 + 15 * 3600_000) / 1000);
+  const cycleStartMs = resetSec * 1000 - 7 * 86400_000;
+
+  const ui = createPanelHarness(
+    null,
+    { multiAccount: false },
+    {
+      account: {
+        groups: [
+          {
+            displayName: 'Gemini Models',
+            buckets: [
+              { bucketId: 'gemini-weekly', window: 'weekly', remaining: { case: 'remainingFraction', value: 0.99 }, resetTime: { seconds: BigInt(resetSec), nanos: 0 } }
+            ]
+          },
+          {
+            displayName: 'Claude and GPT models',
+            buckets: [
+              { bucketId: 'claude-weekly', window: 'weekly', remaining: { case: 'remainingFraction', value: 1 }, resetTime: null }
+            ]
+          }
+        ]
+      },
+      accountFetchedAt: now
+    }
+  );
+
+  const overviewTree = ui.renderOverview({
+    requests: [
+      // Pre-cycle Gemini request -> excluded
+      { id: 'pre', model: 'Gemini 4 Carbon (High)', timestampMs: cycleStartMs - 60_000, durationMs: 1000, inputTokens: 9_000_000, cacheReadTokens: 0, outputTokens: 1000, costUsd: 18, status: 'success' },
+      // Cycle-triggering request starting 400ms before cycleStartMs -> included & safe in Health buckets
+      { id: 'trig', model: 'Gemini 4 Carbon (High)', timestampMs: cycleStartMs - 400, durationMs: 1200, inputTokens: 100_000, cacheReadTokens: 50_000, outputTokens: 50_000, costUsd: 0.71, status: 'success' }
+    ]
+  });
+
+  const rangeBtn = ui.find(overviewTree, 'agy-range');
+  assert.ok(rangeBtn);
+  assert.ok(ui.collectText(rangeBtn).includes('本轮周限额内用量'));
+  assert.ok(ui.find(overviewTree, 'agy-range-weeklyQuota'));
+
+  const summaryEl = ui.find(overviewTree, 'agy-range-summary');
+  const summaryText = ui.collectText(summaryEl);
+  assert.ok(summaryText.includes('重置'));
+  assert.equal(summaryText.includes('\u00b7'), false);
+
+  const tokenTotal = ui.collectText(ui.find(overviewTree, 'agy-distribution-tokens-total'));
+  assert.equal(tokenTotal, '200K');
+
+  const settingsTree = ui.renderSettings();
+  const settingRow = ui.find(settingsTree, 'agy-setting-row-overviewRange');
+  assert.ok(settingRow);
+  assert.ok(ui.collectText(settingRow).includes('概览默认时间范围'));
+  assert.ok(ui.collectText(settingRow).includes('本轮周限额内用量'));
+
+  // Untouched 100% weekly quota across all pools renders explicit 100% untouched label
+  const untouchedUi = createPanelHarness(
+    null,
+    { multiAccount: false },
+    {
+      account: {
+        groups: [
+          { displayName: 'Gemini Models', buckets: [{ bucketId: 'gemini-weekly', window: 'weekly', remaining: { case: 'remainingFraction', value: 1 }, resetTime: null }] }
+        ]
+      },
+      accountFetchedAt: now
+    }
+  );
+  const untouchedTree = untouchedUi.renderOverview({ requests: [] });
+  const untouchedText = untouchedUi.collectText(untouchedUi.find(untouchedTree, 'agy-range-summary'));
+  assert.ok(untouchedText.includes('本轮周限额尚未开始消耗（剩余 100%）'));
+  assert.equal(untouchedText.includes('\u00b7'), false);
 });

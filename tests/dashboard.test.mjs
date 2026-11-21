@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { annotateCacheAnomalies, dateRange,modelIdentity,summarizeRequests,subscriptionIdentity,distributionModels } from '../lib/dashboard.mjs';
+import { annotateCacheAnomalies, dateRange, modelIdentity, resolveWeeklyQuotaWindow, summarizeRequests, subscriptionIdentity, distributionModels, timestampToMs } from '../lib/dashboard.mjs';
 test('calendar ranges use local midnight and a Monday week boundary',()=>{
  const now=+new Date(2026,10,13,12,30),midnight=+new Date(2026,10,13);
  assert.deepEqual(dateRange('today',now),{start:midnight,end:now});
@@ -107,4 +107,113 @@ test('summarizeRequests computes overall and per-model cache hit rates and annot
   assert.equal(anomalies.has('r8'),false);
   assert.equal(anomalies.has('r8b'),false);
   assert.equal(anomalies.has('r9'),false);
+});
+
+
+test('weeklyQuota resolves exact native reset windows, per-pool cycle boundaries, untouched 100% pools, and persisted sample fallbacks', () => {
+  assert.equal(timestampToMs({ seconds: 1795856368n, nanos: 250000000 }), 1795856368250);
+  assert.equal(timestampToMs(1795856368000), 1795856368000);
+  assert.equal(timestampToMs(null), null);
+
+  const SEVEN_DAYS_MS = 7 * 86400_000;
+  const now = 1_795_283_196_000;
+  const geminiResetMs = 1_795_856_368_000;
+  const geminiCycleStartMs = geminiResetMs - SEVEN_DAYS_MS;
+  const fetchedAtMs = now - 20_000;
+
+  // Case 1: Live account with active Gemini weekly cycle and untouched (100% left, no resetTime) Claude/GPT weekly bucket
+  const liveAccount = {
+    groups: [
+      {
+        displayName: 'Gemini Models',
+        buckets: [
+          { bucketId: 'gemini-weekly', window: 'weekly', remaining: { case: 'remainingFraction', value: 0.99 }, resetTime: { seconds: BigInt(geminiResetMs / 1000), nanos: 0 } },
+          { bucketId: 'gemini-5h', window: '5h', remaining: { case: 'remainingFraction', value: 0.98 }, resetTime: { seconds: BigInt((now + 7200_000) / 1000), nanos: 0 } }
+        ]
+      },
+      {
+        displayName: 'Claude and GPT models',
+        buckets: [
+          { bucketId: 'claude-weekly', window: 'weekly', remaining: { case: 'remainingFraction', value: 1 }, resetTime: null },
+          { bucketId: 'claude-5h', window: '5h', remaining: { case: 'remainingFraction', value: 1 }, resetTime: null }
+        ]
+      }
+    ]
+  };
+
+  const range = dateRange('weeklyQuota', now, { account: liveAccount, fetchedAtMs });
+  assert.equal(range.status, 'active');
+  assert.equal(range.source, 'live');
+  assert.equal(range.start, geminiCycleStartMs);
+  assert.equal(range.end, now);
+  assert.equal(range.resetTimeMs, geminiResetMs);
+
+  const requests = [
+    // Previous Gemini cycle request (finished before geminiCycleStartMs) -> excluded
+    { id: 'old-gem', model: 'Gemini 4 Carbon (High)', timestampMs: geminiCycleStartMs - 10_000, durationMs: 2_000, inputTokens: 500_000, cacheReadTokens: 0, outputTokens: 1_000, costUsd: 1.01, status: 'success' },
+    // Cycle-triggering Gemini request (started 500ms before cycleStartMs, finished 800ms after) -> included
+    { id: 'trigger-gem', model: 'Gemini 4 Carbon (High)', timestampMs: geminiCycleStartMs - 500, durationMs: 1_300, inputTokens: 100_000, cacheReadTokens: 0, outputTokens: 500, costUsd: 0.21, status: 'success' },
+    // In-cycle Orchestrator (Gemini) & Argon (unified under Gemini when no dedicated Argon pool) -> included
+    { id: 'orch-gem', model: 'Orchestrator Gemini 4 Neon Extra High', timestampMs: geminiCycleStartMs + 60_000, durationMs: 1_000, inputTokens: 50_000, cacheReadTokens: 0, outputTokens: 500, costUsd: 0.16, status: 'success' },
+    { id: 'argon-gem', model: 'Gemini 4 Argon (Medium)', timestampMs: geminiCycleStartMs + 120_000, durationMs: 1_000, inputTokens: 20_000, cacheReadTokens: 0, outputTokens: 200, costUsd: 0.04, status: 'success' },
+    // Historical Claude request from 2 days ago while Claude weekly bucket is 100% untouched -> excluded
+    { id: 'old-claude', model: 'Claude Opus 5.5 (Medium)', timestampMs: now - 2 * 86400_000, durationMs: 2_000, inputTokens: 300_000, cacheReadTokens: 0, outputTokens: 2_000, costUsd: 1.24, status: 'success' },
+    // Brand-new Claude request sent after fetchedAtMs before next quota poll -> included
+    { id: 'new-claude', model: 'Claude Sonnet 5.5 (Medium)', timestampMs: fetchedAtMs + 5_000, durationMs: 1_000, inputTokens: 10_000, cacheReadTokens: 0, outputTokens: 200, costUsd: 0.03, status: 'success' }
+  ];
+
+  const summary = summarizeRequests(requests, range);
+  assert.deepEqual(summary.requests.map(r => r.id), ['trigger-gem', 'orch-gem', 'argon-gem', 'new-claude']);
+
+  // Case 2: Mid-cycle early reset boundary from quota.observe estimates refines cycleStartMs only when resetTimeMs matches
+  const earlyBoundaryMs = geminiCycleStartMs + 3600_000;
+  const refined = resolveWeeklyQuotaWindow({
+    account: liveAccount,
+    estimates: [
+      { bucketId: 'gemini-weekly', cycleStartMs: earlyBoundaryMs, resetTimeMs: geminiResetMs },
+      { bucketId: 'claude-weekly', cycleStartMs: now - SEVEN_DAYS_MS, resetTimeMs: null }
+    ],
+    fetchedAtMs,
+    now
+  });
+  assert.equal(refined.start, earlyBoundaryMs);
+  assert.equal(refined.pools.find(p => p.key === 'claude')?.state, 'unstarted');
+
+  const mismatchedEst = resolveWeeklyQuotaWindow({
+    account: liveAccount,
+    estimates: [{ bucketId: 'gemini-weekly', cycleStartMs: earlyBoundaryMs, resetTimeMs: geminiResetMs - 999_000 }],
+    fetchedAtMs,
+    now
+  });
+  assert.equal(mismatchedEst.start, geminiCycleStartMs);
+
+  // Case 3: All weekly buckets untouched (100% remaining, no active resetTime) -> unstarted, excludes prior-week usage
+  const allFull = resolveWeeklyQuotaWindow({
+    account: {
+      groups: [
+        { displayName: 'Gemini Models', buckets: [{ bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: 1, resetTimeMs: null }] },
+        { displayName: 'Claude and GPT models', buckets: [{ bucketId: 'claude-weekly', window: 'weekly', remainingFraction: 1, resetTimeMs: null }] }
+      ]
+    },
+    fetchedAtMs: now,
+    now
+  });
+  assert.equal(allFull.status, 'unstarted');
+  assert.equal(summarizeRequests(requests, allFull).requests.length, 0);
+
+  // Case 4: Persisted quotaSamples fallback while live account RPC is still in-flight
+  const fromSamples = resolveWeeklyQuotaWindow({
+    account: null,
+    quotaSamples: [{ bucketId: 'gemini-weekly', resetTimeMs: geminiResetMs, lastAt: now - 5_000 }],
+    now
+  });
+  assert.equal(fromSamples.status, 'active');
+  assert.equal(fromSamples.source, 'samples');
+  assert.equal(fromSamples.start, geminiCycleStartMs);
+  assert.equal(fromSamples.resetTimeMs, geminiResetMs);
+
+  // Case 5: Fallback when neither live account nor valid samples exist
+  const fallback = resolveWeeklyQuotaWindow({ account: null, quotaSamples: [], now });
+  assert.equal(fallback.status, 'fallback');
+  assert.equal(fallback.start, now - SEVEN_DAYS_MS);
 });

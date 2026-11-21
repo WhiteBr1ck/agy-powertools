@@ -135,7 +135,7 @@ Two independent controls sit in the composer (each can be toggled separately in 
 
 Click **Powertools** in the left sidebar to open five local analytics tabs:
 
-- **Overview**: Filter by Last 24 hours, Yesterday, This week, This month, Last 30 days, All time, or a custom date range. Includes request success/error counts, input/output tokens, API reference cost, a 53-week usage heatmap, a model health timeline, paired token and cost donut charts, and per-model speed tables.
+- **Overview**: Defaults to **Current weekly quota** (aligned to native weekly quota reset timestamps), and also filters by Today, Last 24 hours, Yesterday, This week, This month, Last 30 days, All time, or a custom date range. Includes request success/error counts, input/output tokens, API reference cost, a 53-week usage heatmap, a model health timeline, paired token and cost donut charts, and per-model speed tables.
 - **Requests**: Search and filter individual generations by model, conversation scope, and result, with per-request speed, latency, input, cache reads, cache hit rate, output, and estimated cost.
 - **Errors**: Inspect failed requests by timestamp, model, and error summary, with one-click copy for the full error message.
 - **Quota**: Reads native account quota endpoints to display your current plan badge (Pro / Ultra, etc.) and remaining 5-hour and weekly percentages, reset times, and sampled budget estimates for Gemini and Claude / GPT buckets.
@@ -239,6 +239,7 @@ All options can be toggled live in **Powertools -> Settings** and persist automa
 
 | Setting | Default | Description |
 | --- | --- | --- |
+| Default Overview range | `Current weekly quota` | Default time range shown on the Powertools Overview tab (`Current weekly quota`, `Today`, `Last 24 hours`, `Yesterday`, `This week`, `This month`, `Last 30 days`, or `All time`) |
 | Context ring | On | Shows the context usage ring and breakdown popover in the composer (including step cache reuse and Orchestrator per-model context; ring-only at 0 usage) |
 | Speed & statistics | On | Shows a circular dynamic speed dial with latest throughput in the composer and opens session telemetry |
 | Task progress | On | Renders checklist progress, live execution phase (approval wait, retry reason, running tool, thinking, streaming), recent tool activity, and elapsed timer inside Overview |
