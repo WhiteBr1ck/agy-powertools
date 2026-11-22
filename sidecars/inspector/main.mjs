@@ -259,11 +259,15 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const paths = installationPaths();
   const settings = createSettingsStore();
   const remoteSsh = isRemoteSshEnvironment();
-  let missingPortPolls = 0, shortcutsHealed = false;
+  let missingPortPolls = 0, shortcutsHealed = false, everConnectedDebugPort = false;
   const stop = startNativeIntegration({
     parseSessionData,
+    onDebugPortReady() {
+      everConnectedDebugPort = true;
+      missingPortPolls = 0;
+    },
     onMissingDebugPort() {
-      if (remoteSsh) return;
+      if (remoteSsh || everConnectedDebugPort) return;
       missingPortPolls++;
       if (!shortcutsHealed) {
         shortcutsHealed = true;

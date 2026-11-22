@@ -34,3 +34,84 @@ test('component discovery includes lexical declarations without executing bundle
   const source='var Alpha=1;const Beta=2,Gamma=3;let Delta=4;globalThis.sideEffect();';
   assert.deepEqual(declaredNativeNames(source),['Alpha','Beta','Gamma','Delta']);
 });
+
+test('onMissingDebugPort triggers on missing/refused port before connection, ignores transient timeouts, and stops after debug port is ready', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agy-port-guard-'));
+  const missingFile = join(dir, 'missing-port');
+  const activeFile = join(dir, 'active-port');
+  writeFileSync(activeFile, '12345\n');
+  const originalFetch = globalThis.fetch;
+
+  let stopMissing, stopTimeout, stopReady;
+  try {
+    let missingCalls = 0;
+    stopMissing = startNativeIntegration({
+      portFile: missingFile,
+      parseSessionData: () => ({}),
+      onStatus: () => {},
+      onMissingDebugPort: () => { missingCalls++; }
+    });
+    await stopMissing.ready;
+    assert.equal(missingCalls, 1, 'missing DevToolsActivePort file should notify onMissingDebugPort');
+
+    globalThis.fetch = async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+    };
+    let refusedCalls = 0;
+    const stopRefused = startNativeIntegration({
+      portFile: activeFile,
+      parseSessionData: () => ({}),
+      onStatus: () => {},
+      onMissingDebugPort: () => { refusedCalls++; }
+    });
+    try {
+      await stopRefused.ready;
+      assert.equal(refusedCalls, 1, 'ECONNREFUSED before first connection should notify onMissingDebugPort');
+    } finally {
+      await stopRefused();
+    }
+
+    let fetchMode = 'timeout';
+    globalThis.fetch = async () => {
+      if (fetchMode === 'timeout') throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      if (fetchMode === 'abort') throw Object.assign(new Error('Aborted'), { name: 'AbortError', code: 'ABORT_ERR' });
+      if (fetchMode === 'refused') throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+      return { json: async () => [] };
+    };
+    let timeoutMissingCalls = 0;
+    stopTimeout = startNativeIntegration({
+      portFile: activeFile,
+      parseSessionData: () => ({}),
+      onStatus: () => {},
+      onMissingDebugPort: () => { timeoutMissingCalls++; }
+    });
+    await stopTimeout.ready;
+    fetchMode = 'abort';
+    await stopTimeout.check();
+    assert.equal(timeoutMissingCalls, 0, 'transient timeouts before connection must not trigger onMissingDebugPort');
+
+    let readyCalls = 0, postReadyMissingCalls = 0;
+    fetchMode = 'ok';
+    stopReady = startNativeIntegration({
+      portFile: activeFile,
+      parseSessionData: () => ({}),
+      onStatus: () => {},
+      onDebugPortReady: () => { readyCalls++; },
+      onMissingDebugPort: () => { postReadyMissingCalls++; }
+    });
+    await stopReady.ready;
+    assert.equal(readyCalls, 1, 'successful /json/list poll should invoke onDebugPortReady');
+
+    fetchMode = 'timeout';
+    await stopReady.check();
+    fetchMode = 'refused';
+    await stopReady.check();
+    assert.equal(postReadyMissingCalls, 0, 'subsequent timeout or ECONNREFUSED after debug port reached must not trigger onMissingDebugPort');
+  } finally {
+    await stopMissing?.();
+    await stopTimeout?.();
+    await stopReady?.();
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
