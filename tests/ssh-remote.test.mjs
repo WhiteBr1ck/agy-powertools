@@ -189,10 +189,12 @@ test('createRemoteTelemetryBridge runs in-memory worker over child stdio, tolera
   });
 
   try {
-    const [remoteState, remoteSubagents, remoteDash] = await Promise.all([
+    const [remoteState, remoteSubagents, remoteDash, remoteSearch, remoteMd] = await Promise.all([
       bridge.state('homelab', { conversationId: 'conv-main' }),
       bridge.subagents('homelab', { conversationIds: ['sub-1', 'missing-sub'] }),
-      bridge.dashboard('homelab', { force: true })
+      bridge.dashboard('homelab', { force: true }),
+      bridge.search('homelab', { query: 'homelab', excludeIds: ['sub-1'] }),
+      bridge.markdown('homelab', { conversationId: 'conv-main', title: 'Homelab Perf' })
     ]);
 
     assert.equal(spawnCalls.length, 1);
@@ -213,6 +215,10 @@ test('createRemoteTelemetryBridge runs in-memory worker over child stdio, tolera
     assert.equal(remoteSubagents.sessions['sub-1'].conversationId, 'sub-1');
     assert.equal(remoteSubagents.sessions['missing-sub'].conversationId, '');
     assert.equal(remoteDash.totalRequests, 2);
+    assert.equal(remoteSearch.results.length, 1);
+    assert.equal(remoteSearch.results[0].conversationId, 'conv-main');
+    assert.match(remoteMd.markdown, /^# Homelab Perf\n/);
+    assert.ok(remoteMd.markdown.includes('Analyze homelab performance'));
   } finally {
     await bridge.close();
   }

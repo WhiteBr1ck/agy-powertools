@@ -52,7 +52,7 @@ test('executionState surfaces SYSTEM_MESSAGE wakeup origin, notFullyIdle, and ac
   assert.deepEqual(ex.activeSubagents,[{title:'UI Verification',status:'running'}]);
 });
 
-test('master switch restores renamed native hooks and reuses saved enhancements on enable',()=>{
+test('master switch restores renamed native hooks and reuses saved enhancements on enable',async()=>{
   const original={checkpointConfig:{enabled:true},plannerConfig:{noToolExplanation:true}};
   const nativeResolve=()=>original,nativeSegment=()=>({body:{type:'collapsible'}}),send=payload=>payload;
   const service={forkConversation(){},sendUserCascadeMessage:send};
@@ -61,14 +61,21 @@ test('master switch restores renamed native hooks and reuses saved enhancements 
     __agyNativeBindings:{names:{resolve:'renamedResolve',segment:'renamedSegment',menu:'renamedMenu'}},I:{},tc:(_,value)=>structuredClone(value),Wb:(_,value)=>value});
   vm.runInContext(readFileSync(new URL('../lib/native-client.js',import.meta.url),'utf8'),context);
   const adapter=context.__agyNativeAdapter;
-  adapter.setStageUpdates(true);adapter.setContextLimit(1000000);adapter.setEfficientIO(true);
+  adapter.setStageUpdates(true);adapter.setContextLimit(1000000);adapter.setEfficientIO(true);adapter.setPragmaticCoding(true);
   assert.equal(context.renamedResolve().checkpointConfig.maxTokenLimit,1000000);
   adapter.setEnabled(false);
   assert.equal(context.renamedResolve,nativeResolve);assert.equal(context.renamedSegment,nativeSegment);assert.equal(service.sendUserCascadeMessage,send);
   assert.equal(adapter.stageUpdates,false);assert.equal(context.sjc,undefined);assert.equal(context.Yyc,undefined);
   adapter.setEnabled(true);
   const config=context.renamedResolve();assert.equal(config.checkpointConfig.maxTokenLimit,1000000);
-  assert.deepEqual(Array.from(config.plannerConfig.promptSectionCustomizationConfig.appendPromptSections,p=>p.title),['powertools_stage_updates','powertools_efficient_io']);
+  assert.deepEqual(Array.from(config.plannerConfig.promptSectionCustomizationConfig.appendPromptSections,p=>p.title),['powertools_stage_updates','powertools_efficient_io','powertools_pragmatic_coding']);
+  adapter.setPragmaticCoding(false);
+  assert.deepEqual(Array.from(context.renamedResolve().plannerConfig.promptSectionCustomizationConfig.appendPromptSections,p=>p.title),['powertools_stage_updates','powertools_efficient_io']);
+  adapter.setGoalBar(true);
+  adapter.setConversationGoal('conv-goal',{text:'Ship all tests green',status:'active'});
+  const sentWithGoal=await service.sendUserCascadeMessage({cascadeId:'conv-goal',items:[{chunk:{case:'text',value:'continue'}}]});
+  assert.ok(sentWithGoal.cascadeConfig.plannerConfig.promptSectionCustomizationConfig.appendPromptSections.some(p=>p.title==='powertools_active_goal'&&p.content.includes('Ship all tests green')));
+  adapter.setConversationGoal('conv-goal',null);
   adapter.dispose();assert.equal(context.renamedResolve,nativeResolve);assert.equal(context.renamedSegment,nativeSegment);
 });
 
@@ -693,4 +700,55 @@ test('stable sendUserCascadeMessage wrapper preserves edit revert even when comp
     ['revert', 'conv-stable', 3, { conversationOnly: true }],
     ['send', 'conv-stable']
   ]);
+});
+
+test('conversationDirectory and workspaceUri classify running, unread, projects, and exclude subagents', () => {
+  const summaries = {
+    'run-new': {
+      status: 2,
+      notFullyIdle: true,
+      summary: 'Training baseline',
+      lastModifiedTime: { seconds: 500 },
+      trajectoryMetadata: {
+        projectId: 'proj-a',
+        workspaces: [{ workspaceFolderAbsoluteUri: 'file:///Users/dev/FlowIE' }]
+      }
+    },
+    'run-old': {
+      status: 2,
+      summary: 'Fix auth scan',
+      lastModifiedTime: { seconds: 300 },
+      trajectoryMetadata: {
+        projectId: 'proj-b',
+        workspaces: [{ workspaceFolderAbsoluteUri: 'file:///Users/dev/somebug' }]
+      }
+    },
+    'unread-1': {
+      status: 1,
+      summary: 'Completed check',
+      lastModifiedTime: { seconds: 400 },
+      annotations: { lastUserViewTime: { seconds: 200 } },
+      trajectoryMetadata: {
+        projectId: 'proj-a',
+        workspaces: [{ workspaceFolderAbsoluteUri: 'file:///Users/dev/FlowIE' }]
+      }
+    },
+    'sub-child': {
+      status: 2,
+      parentConversationId: 'run-new',
+      lastModifiedTime: { seconds: 600 }
+    }
+  };
+  const reduxStore = { getState: () => ({ trajectorySummaries: { summaries }, conversation: { localLastViewedTimes: {} } }), dispatch() {} };
+  const element = { '__reactFiber$f': { tag: 10, type: {}, memoizedProps: { value: { store: reduxStore } }, return: null } };
+  const context = vm.createContext({ document: { querySelector: () => element } });
+  vm.runInContext(readFileSync(new URL('../lib/native-client.js', import.meta.url), 'utf8'), context);
+  const adapter = context.__agyNativeAdapter;
+  assert.equal(adapter.workspaceUri('run-new'), 'file:///Users/dev/FlowIE');
+  const dir = JSON.parse(JSON.stringify(adapter.conversationDirectory('other', true)));
+  assert.deepEqual(dir.running.map(r => r.id), ['run-new', 'run-old']);
+  assert.equal(dir.running[0].projectName, 'FlowIE');
+  assert.deepEqual(dir.unread.map(u => u.id), ['unread-1']);
+  assert.deepEqual(dir.subagentIds, ['sub-child']);
+  assert.equal(dir.projects.length, 2);
 });

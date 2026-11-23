@@ -598,3 +598,105 @@ test('startAddAccount awaits active sync and calls accounts.completeAdd, and ref
 
   p.context.__agyPowertools.dispose();
 });
+
+test('sidebar bell switches to most recent running session, toggles Priority view, and search shortcut ignores terminal focus', async () => {
+  const p = page(true);
+  p.context.location.pathname = '/c/idle-conv';
+  const renderedTrees = new Map();
+  p.context.React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useSyncExternalStore: () => 0,
+    useEffect: () => {},
+    useState: init => [typeof init === 'function' ? init() : init, () => {}],
+    useRef: v => ({ current: v })
+  };
+  p.context.ReactDOM = {
+    createRoot(mount) {
+      return {
+        render(tree) { renderedTrees.set(mount.dataset?.agyPowertoolsRoot, tree); },
+        unmount() { renderedTrees.delete(mount.dataset?.agyPowertoolsRoot); }
+      };
+    }
+  };
+
+  const navigated = [];
+  let jumpedTurn = null;
+  p.context.__agyNativeAdapter = {
+    wrap: el => el,
+    installPage: () => true,
+    router: () => ({
+      navigate: async arg => {
+        navigated.push(arg);
+        if (arg?.params?.cascadeId) p.context.location.pathname = `/c/${arg.params.cascadeId}`;
+      },
+      subscribe: () => () => {}
+    }),
+    navigateTurn: turn => { jumpedTurn = turn; return true; },
+    conversationDirectory: () => ({
+      running: [
+        { id: 'run-latest', title: 'Train A100 model', projectId: 'p-ml', projectName: 'FlowIE', running: true, updatedAtMs: 2000 },
+        { id: 'run-older', title: 'Check logs', projectId: 'p-ops', projectName: 'ops', running: true, updatedAtMs: 1000 }
+      ],
+      unread: [],
+      projects: [],
+      byId: {},
+      subagentIds: []
+    })
+  };
+
+  let capturedEnv = null;
+  p.context.__agyPanels = env => { capturedEnv = env; return { Page: () => null, Sidebar: () => null, dispose() {} }; };
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    if (req.method === 'settings.get') {
+      queueMicrotask(() => p.context.__agyPowertoolsReceive(req.id, { enabled: true, sidebarFocusBell: true, sessionSearch: true, sessionSearchShortcut: true }));
+    }
+  };
+
+  const headerRow = { insertBefore(child) { child.isConnected = true; } };
+  const searchBtn = { isConnected: true, parentElement: headerRow };
+  const navBlockParent = { insertBefore(child) { child.isConnected = true; } };
+  const navBlock = { isConnected: true, parentElement: navBlockParent, nextSibling: null };
+  const sidebarEl = {
+    querySelector: sel => {
+      if (sel.includes('Search')) return searchBtn;
+      if (sel === '[data-testid="sidebar-navigation-items"]') return navBlock;
+      return null;
+    }
+  };
+  p.document.querySelector = sel => sel.includes('Sidebar') ? sidebarEl : null;
+
+  p.context.__agyInitialSettings = { enabled: true, sidebarFocusBell: true, sessionSearch: true, sessionSearchShortcut: true };
+  vm.runInContext(source, p.context);
+
+  const bellFnTree = renderedTrees.get('sidebar-bell');
+  assert.ok(bellFnTree);
+  const bellRendered = bellFnTree.type(bellFnTree.props);
+  assert.equal(bellRendered.props['data-testid'], 'agy-sidebar-bell-btn');
+
+  // First click switches to run-latest and opens Priority panel
+  bellRendered.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(navigated[0].params.cascadeId, 'run-latest');
+  assert.ok(renderedTrees.has('sidebar-focus'));
+
+  // Cmd+Opt+F triggers Session Search unless inside .xterm terminal
+  const keyHandlers = p.callbacks.get('keydown') || [];
+  let prevented = false;
+  for (const fn of keyHandlers) {
+    fn({ metaKey: true, altKey: true, shiftKey: false, code: 'KeyF', key: 'ƒ', target: { closest: sel => sel.includes('.xterm') ? {} : null }, preventDefault() { prevented = true; }, stopPropagation() {} });
+  }
+  assert.equal(prevented, false);
+  for (const fn of keyHandlers) {
+    fn({ metaKey: true, altKey: true, shiftKey: false, code: 'KeyF', key: 'ƒ', target: { closest: () => null }, preventDefault() { prevented = true; }, stopPropagation() {} });
+  }
+  assert.equal(prevented, true);
+  assert.equal(capturedEnv.consumeRequestedTab(), 'search');
+
+  // jumpToSearchHit navigates to target conversation and scrolls to matched turn
+  capturedEnv.jumpToSearchHit({ conversationId: 'run-older', projectId: 'p-ops', stepIndexStart: 14 });
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(JSON.parse(JSON.stringify(jumpedTurn)), { stepIndexStart: 14 });
+
+  p.context.__agyPowertools.dispose();
+});

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { parseSessionData, exportTranscript, resolveConversationId } from '../sidecars/inspector/main.mjs';
+import { formatConversationMarkdown } from '../lib/session-parser.mjs';
 import { decodeGeneration } from '../lib/database.mjs';
 import { fields } from '../lib/protobuf.mjs';
 import { isHubTarget, findIdentifier } from '../lib/native-host.mjs';
@@ -101,5 +102,37 @@ test('native integration follows conversation titles and excludes external pages
   assert.ok(!isHubTarget({type:'iframe',title:'Antigravity',url:'https://127.0.0.1:1234/'}));
   assert.equal(findIdentifier({events:[{response:{conversationId:'new-id'}}]}),'new-id');
   assert.equal(findIdentifier({events:[{metadata:{projectId:'source-project'}}]},['projectId']),'source-project');
+});
+
+test('formatConversationMarkdown cleans system tags, hydrates truncated content from transcript_full.jsonl, and supports upToTurn', () => {
+  const root = mkdtempSync(join(tmpdir(), 'agy-md-'));
+  try {
+    const logs = join(root, 'brain', 'md-conv', '.system_generated', 'logs');
+    mkdirSync(logs, { recursive: true });
+    writeFileSync(join(logs, 'transcript.jsonl'), [
+      JSON.stringify({ step_index: 0, type: 'USER_INPUT', content: '<USER_REQUEST>\n实现缓存清理脚本\n</USER_REQUEST>\n<ADDITIONAL_METADATA>meta</ADDITIONAL_METADATA>' }),
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'truncated...', truncated_fields: ['content'], tool_calls: [{ name: 'run_command', args: { CommandLine: '"rm -rf .cache"' } }] }),
+      JSON.stringify({ step_index: 2, type: 'USER_INPUT', content: '<USER_REQUEST>\n再加个单元测试\n</USER_REQUEST>' }),
+      JSON.stringify({ step_index: 3, type: 'PLANNER_RESPONSE', content: '单测已补齐！\n<!-- GOAL_COMPLETE -->' })
+    ].join('\n') + '\n');
+    writeFileSync(join(logs, 'transcript_full.jsonl'), [
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: '完整长回复内容：```sh\nrm -rf .cache\n```' })
+    ].join('\n') + '\n');
+
+    const full = formatConversationMarkdown('md-conv', { appDataDir: root, title: '自定义标题' });
+    assert.equal(full.turnCount, 2);
+    assert.match(full.markdown, /^# 自定义标题\n/);
+    assert.ok(full.markdown.includes('完整长回复内容'));
+    assert.ok(!full.markdown.includes('ADDITIONAL_METADATA'));
+    assert.ok(!full.markdown.includes('GOAL_COMPLETE'));
+    assert.ok(full.markdown.includes('rm -rf .cache'));
+
+    const turn1 = formatConversationMarkdown('md-conv', { appDataDir: root, upToTurn: 1 });
+    assert.equal(turn1.turnCount, 1);
+    assert.ok(!turn1.markdown.includes('再加个单元测试'));
+    assert.throws(() => formatConversationMarkdown('../bad', { appDataDir: root }), /找不到/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
