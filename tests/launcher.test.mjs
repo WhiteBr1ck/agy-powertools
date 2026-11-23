@@ -24,7 +24,10 @@ import {
   isWindowsRunnableFile,
   openLocalFile,
   copyLocalFile,
-  readLocalFileForAttach
+  readLocalFileForAttach,
+  parseFileUriAnchor,
+  resolveExternalEditor,
+  openInExternalEditor
 } from '../lib/launcher.mjs';
 import { startSidecarWebUi, renderAuxPaneHtml } from '../lib/sidecar-ui.mjs';
 
@@ -648,6 +651,67 @@ test('readLocalFileForAttach returns base64 media for images/PDFs, mentions for 
 
     await assert.rejects(() => readLocalFileForAttach(pathToFileURL(join(dir, 'missing.png')).href), /不存在/);
     await assert.rejects(() => readLocalFileForAttach('https://example.com/a.png'), /仅支持本地文件/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('parseFileUriAnchor, resolveExternalEditor, and openInExternalEditor jump to exact lines across editors and WSL URIs', async () => {
+  assert.deepEqual(parseFileUriAnchor('file:///repo/a.js#L42'), { line: 42, column: null });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/a.js#L18C7-L25'), { line: 18, column: 7 });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/a.js#L9:3'), { line: 9, column: 3 });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/README.md#overview'), { line: null, column: null });
+
+  const wslResolved = resolveLocalFilePath('file://wsl.localhost/Ubuntu/home/dev/app.ts#L12', { platform: 'linux' });
+  assert.equal(wslResolved, '/home/dev/app.ts');
+
+  const dir = mkdtempSync(join(tmpdir(), 'agy-editor-'));
+  try {
+    const targetFile = join(dir, 'main.mjs');
+    writeFileSync(targetFile, 'console.log(1);\n');
+    const binDir = join(dir, 'bin');
+    mkdirSync(binDir);
+    const cursorBin = join(binDir, 'cursor');
+    const zedBin = join(binDir, 'zed');
+    writeFileSync(cursorBin, '');
+    writeFileSync(zedBin, '');
+
+    const autoFound = resolveExternalEditor({ preferred: 'auto', platform: 'linux', env: { PATH: binDir }, home: dir });
+    assert.equal(autoFound.id, 'cursor');
+
+    const calls = [];
+    const fakeSpawn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return { on() {}, unref() {} };
+    };
+
+    const uriWithLine = `${pathToFileURL(targetFile).href}#L27C4`;
+    const resCursor = await openInExternalEditor(uriWithLine, {
+      preferred: 'auto',
+      platform: 'linux',
+      env: { PATH: binDir },
+      home: dir,
+      spawnProcess: fakeSpawn
+    });
+    assert.equal(resCursor.editor, 'cursor');
+    assert.equal(resCursor.line, 27);
+    assert.equal(resCursor.column, 4);
+    assert.deepEqual(calls[0].args, ['-g', `${targetFile}:27:4`]);
+
+    const resZed = await openInExternalEditor(uriWithLine, {
+      preferred: 'zed',
+      platform: 'linux',
+      env: { PATH: binDir },
+      home: dir,
+      spawnProcess: fakeSpawn
+    });
+    assert.equal(resZed.editor, 'zed');
+    assert.deepEqual(calls[1].args, [`${targetFile}:27:4`]);
+
+    await assert.rejects(
+      () => openInExternalEditor(uriWithLine, { preferred: 'windsurf', platform: 'linux', env: { PATH: binDir }, home: dir, spawnProcess: fakeSpawn }),
+      /Windsurf/
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
