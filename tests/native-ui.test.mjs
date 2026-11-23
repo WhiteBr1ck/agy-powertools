@@ -681,7 +681,12 @@ test('sidebar bell switches to most recent running session, toggles Priority vie
       return null;
     }
   };
-  p.document.querySelector = sel => sel.includes('Sidebar') ? sidebarEl : null;
+  p.context.getComputedStyle = () => ({ display: 'flex' });
+  p.document.querySelector = sel => {
+    if (sel.includes('Open Conversation Picker')) return searchBtn;
+    if (sel.includes('Sidebar')) return sidebarEl;
+    return null;
+  };
 
   p.context.__agyInitialSettings = { enabled: true, sidebarFocusBell: true, sessionSearch: true, sessionSearchShortcut: true };
   vm.runInContext(source, p.context);
