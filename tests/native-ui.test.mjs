@@ -653,8 +653,25 @@ test('sidebar bell switches to most recent running session, toggles Priority vie
     }
   };
 
-  const headerRow = { insertBefore(child) { child.isConnected = true; } };
-  const searchBtn = { isConnected: true, parentElement: headerRow };
+  const headerChildren = [];
+  const syncHeaderSiblings = () => {
+    for (let i = 0; i < headerChildren.length; i++) headerChildren[i].nextSibling = headerChildren[i + 1] || null;
+  };
+  const headerRow = {
+    insertBefore(child, before) {
+      child.isConnected = true;
+      const existing = headerChildren.indexOf(child);
+      if (existing >= 0) headerChildren.splice(existing, 1);
+      const idx = before ? headerChildren.indexOf(before) : -1;
+      if (idx >= 0) headerChildren.splice(idx, 0, child);
+      else headerChildren.push(child);
+      syncHeaderSiblings();
+    }
+  };
+  const afterSearch = { id: 'after-search', isConnected: true, parentElement: headerRow, nextSibling: null };
+  const searchBtn = { id: 'search', isConnected: true, parentElement: headerRow, nextSibling: afterSearch };
+  headerChildren.push(searchBtn, afterSearch);
+  syncHeaderSiblings();
   const navBlockParent = { insertBefore(child) { child.isConnected = true; } };
   const navBlock = { isConnected: true, parentElement: navBlockParent, nextSibling: null };
   const sidebarEl = {
@@ -671,6 +688,7 @@ test('sidebar bell switches to most recent running session, toggles Priority vie
 
   const bellFnTree = renderedTrees.get('sidebar-bell');
   assert.ok(bellFnTree);
+  assert.deepEqual(headerChildren.map(c => c.id || c.dataset?.agyPowertoolsRoot), ['search', 'sidebar-bell', 'after-search']);
   const bellRendered = bellFnTree.type(bellFnTree.props);
   assert.equal(bellRendered.props['data-testid'], 'agy-sidebar-bell-btn');
 

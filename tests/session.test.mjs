@@ -111,21 +111,25 @@ test('formatConversationMarkdown cleans system tags, hydrates truncated content 
     mkdirSync(logs, { recursive: true });
     writeFileSync(join(logs, 'transcript.jsonl'), [
       JSON.stringify({ step_index: 0, type: 'USER_INPUT', content: '<USER_REQUEST>\n实现缓存清理脚本\n</USER_REQUEST>\n<ADDITIONAL_METADATA>meta</ADDITIONAL_METADATA>' }),
-      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'truncated...', truncated_fields: ['content'], tool_calls: [{ name: 'run_command', args: { CommandLine: '"rm -rf .cache"' } }] }),
-      JSON.stringify({ step_index: 2, type: 'USER_INPUT', content: '<USER_REQUEST>\n再加个单元测试\n</USER_REQUEST>' }),
-      JSON.stringify({ step_index: 3, type: 'PLANNER_RESPONSE', content: '单测已补齐！\n<!-- GOAL_COMPLETE -->' })
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'truncated...', truncated_fields: ['content', 'tool_calls'], tool_calls: [{ name: 'run_command', args: { CommandLine: '"rm..."' } }] }),
+      JSON.stringify({ step_index: 2, type: 'GENERIC', content: 'short out...', truncated_fields: ['content'] }),
+      JSON.stringify({ step_index: 3, type: 'USER_INPUT', content: '<USER_REQUEST>\n再加个单元测试\n</USER_REQUEST>' }),
+      JSON.stringify({ step_index: 4, type: 'PLANNER_RESPONSE', content: '单测已补齐！\n<!-- GOAL_COMPLETE -->' })
     ].join('\n') + '\n');
     writeFileSync(join(logs, 'transcript_full.jsonl'), [
-      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: '完整长回复内容：```sh\nrm -rf .cache\n```' })
+      JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: '完整长回复内容：先清理构建缓存', tool_calls: [{ name: 'run_command', args: { CommandLine: '"rm -rf .cache/full-dir"', WaitMsBeforeAsync: '5000' } }] }),
+      JSON.stringify({ step_index: 2, type: 'GENERIC', content: 'Command exited with code 0.\n\nCommand output:\nRemoved 42 cached files including ```nested``` snippet' })
     ].join('\n') + '\n');
 
     const full = formatConversationMarkdown('md-conv', { appDataDir: root, title: '自定义标题' });
     assert.equal(full.turnCount, 2);
     assert.match(full.markdown, /^# 自定义标题\n/);
-    assert.ok(full.markdown.includes('完整长回复内容'));
+    assert.ok(full.markdown.includes('完整长回复内容：先清理构建缓存'));
+    assert.ok(full.markdown.includes('rm -rf .cache/full-dir'));
+    assert.ok(full.markdown.includes('Removed 42 cached files including ```nested``` snippet'));
+    assert.ok(full.markdown.includes('````text'));
     assert.ok(!full.markdown.includes('ADDITIONAL_METADATA'));
     assert.ok(!full.markdown.includes('GOAL_COMPLETE'));
-    assert.ok(full.markdown.includes('rm -rf .cache'));
 
     const turn1 = formatConversationMarkdown('md-conv', { appDataDir: root, upToTurn: 1 });
     assert.equal(turn1.turnCount, 1);
