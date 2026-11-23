@@ -103,11 +103,12 @@
 - **Context and speed telemetry**: Adds a context usage ring (with cache reuse, compaction count, and Orchestrator planner/executor bars) and a speed dial (`tok/s`, TTFT, model vs. tool duration, and estimated session cost) next to the composer, including subagent stats.
 - **Local usage and request dashboard**: Adds a `Powertools` sidebar page with usage overview (53-week heatmap, token/cost donuts, model table), per-request log, short-interval cache anomaly flags, one-click error copy, quota estimates, and official API pricing refresh.
 - **Compact layout and live stage updates**: Keeps your client font size while tightening line height and block spacing; reports short progress updates during multi-step tool runs and folds them into the top duration header once finished.
-- **Session branching and inline editing**: Fork a new chat from any reply or conversation menu with full history preserved (including chats that used subagents), or edit a sent message in place using Antigravity's native composer.
+- **Session branching, inline editing, and full Markdown export**: Fork a new chat from any reply or conversation menu with full history preserved (including subagent chats), edit sent messages in place, or copy full conversations (or up to any turn) as complete Markdown including tool call arguments, tool outputs, and restored truncated responses across local and SSH sessions.
+- **Codex-style workflow enhancements**: Full-text search across local and SSH transcripts (`Cmd+Opt+F` / `Ctrl+Alt+F`, jumping directly to matched turns with one-click code/command copy), an active-sessions bell next to the titlebar conversation picker with a sidebar `Priority` running/unread view, a non-locking composer Git status &amp; read-only Unified Diff pill (`+X / -Y`), a persistent `/goal` bar above the composer with a live Goal editor drawer, plus an optional pragmatic coding mode and read-only `/code-review` skill.
 - **Multi-account switching (off by default)**: Uses Windows Credential Manager, macOS Keychain, or Linux Secret Service to keep multiple Google accounts isolated without plaintext tokens; check 5-hour/weekly quotas and switch from the sidebar, with optional auto-switch on depletion.
 - **No-TUN application proxy (off by default)**: Injects proxy flags and environment variables for Antigravity alone on relaunch, with HTTP CONNECT / SOCKS5 testing, cold-start prompts, and optional `GODEBUG=http2client=0` to reduce `EOF` disconnects.
 - **SSH remote and WSL2 support**: Reads remote session, subagent, and dashboard metrics in desktop `SSH` windows over local OpenSSH without installing anything on the server; supports Windows Antigravity with built-in WSL2 backends across NAT and Mirrored networking, hybrid credential storage, and relaunch delegation.
-- **File context menu and small utilities**: Right-click file links or Files tree entries to attach to chat, open, reveal in folder, copy the file, or copy its path (including LAN NAS / SMB paths on Windows); adds collapsible Overview Task Progress and Quota panels, titlebar unread counts, optional composer quota ring, and optional user bubble tint.
+- **File context menu and external editor jump**: Right-click file links or Files tree entries to attach to chat, open in an external editor at exact `line:col` anchors (auto-detecting `Cursor` / `VS Code` / `Windsurf` / `Zed`, including WSL2 paths), open with default app, reveal in folder, copy the file, or copy its path (including LAN NAS / SMB paths on Windows); adds collapsible Overview Task Progress and Quota panels, titlebar unread counts, optional composer quota ring, and optional user bubble tint.
 
 ---
 
@@ -165,6 +166,7 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | Keep Overview open when switching chats | On | Preserves the right Overview panel open state across conversations |
 | Conversations per project | `Default (6)` | Controls visible chats per project in the sidebar (`Default (6)`, `1-10`, or `Show all`) |
 | Taskbar unread badge | On | Shows `(N)` unread count in the window and taskbar title when background chats finish |
+| Sidebar active-sessions bell | On | Places a bell button right of the titlebar Conversation Picker button to jump to the latest running chat and toggle the sidebar `Priority` list |
 
 ### Telemetry & progress
 
@@ -173,6 +175,7 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | Default Overview range | `Current weekly quota` | Choose weekly quota cycle, Today, 24h, Yesterday, This week, This month, 30d, or All time |
 | Context ring | On | Shows context usage ring, cache reuse breakdown, and Orchestrator per-model bars |
 | Speed & statistics | On | Shows the speed dial and opens session telemetry and estimated cost |
+| Composer Git status pill | On | Shows current branch and uncommitted line stats (`+X / -Y`) in the composer with read-only diff preview, `@` attach, and external editor launch |
 | Task progress | On | Collapsible Overview section with checklist progress, live phase, and step durations |
 | Show quota in Overview | Off | Collapsible Overview section showing 5-hour and weekly remaining quotas |
 | Composer quota halo | Off | Draws remaining quota clockwise around the composer card (emerald, amber, or red) |
@@ -186,7 +189,12 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | --- | --- | --- |
 | Stage updates | On | Reports brief progress updates during tool runs and folds them on completion |
 | Parallel search & read | Off | Guides the agent to batch file searches and reads in one turn |
+| Pragmatic coding mode | Off | Guides the agent to diagnose root causes first, make minimal surgical edits, and run targeted checks |
+| Session full-text search / Shortcut | On | Searches prompts, replies, code blocks, and commands across local and SSH transcripts (`Cmd+Opt+F` / `Ctrl+Alt+F`) |
+| Copy conversation as Markdown | On | Copies full transcripts (including tool arguments, tool outputs, and restored truncated responses) or up to a selected turn across local and SSH chats |
+| Persistent Goal bar & editor | On | Docks active `/goal` tasks above the composer with live elapsed time, pause/clear actions, and a right-hand Goal editor drawer |
 | Branching / Message edit / File menu | On | Native session branching, inline message editing, and local/NAS/Files tree context menu |
+| Preferred external editor | `Auto-detect` | Editor used by `Open in editor` (`Auto-detect`, `Cursor`, `VS Code`, `Windsurf`, or `Zed`) with `line:col` jump support |
 | Enable multi-account switching | Off | Opt-in with risk notice; sidebar switcher, list/card views, 5H/weekly toggle, and auto-switch |
 | Application proxy (no TUN) | Off | Protocol/host/port fields, connectivity checks, cold-start prompt, and Force HTTP/1.1 |
 | Context target (Experimental) | `Default` | Choose `Default`, `256K`, `500K`, or `1M` (`Default` leaves native settings unchanged) |
