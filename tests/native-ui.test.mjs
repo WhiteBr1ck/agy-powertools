@@ -33,6 +33,29 @@ function page(ready = false) {
   return { context, document, nodes, callbacks, node };
 }
 
+test('SSH command paste observes setting changes without reinstalling its listener', async () => {
+  const p = page(true);
+  const settings = { enabled: true };
+  p.context.__agyInitialSettings = settings;
+  let change, enabled, installs = 0;
+  p.context.__agyPanels = env => { change = env.change; };
+  p.context.installSshCommandPaste = (_document, options) => { enabled = options.enabled; installs++; };
+  p.context.__agyPowertoolsHost = raw => {
+    const { id, method, settings: patch } = JSON.parse(raw);
+    if (method === 'settings.set') Object.assign(settings, patch);
+    queueMicrotask(() => p.context.__agyPowertoolsReceive?.(id, { ...settings }));
+  };
+  vm.runInContext(source, p.context);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(enabled(), true);
+  await change({ sshCommandPaste: false });
+  assert.equal(enabled(), false);
+  await change({ sshCommandPaste: true });
+  assert.equal(enabled(), true);
+  assert.equal(installs, 1);
+  p.context.__agyPowertools.dispose();
+});
+
 test('new-document injection waits for head and body and initializes exactly once', () => {
   const p = page();
   vm.runInContext(source, p.context);
