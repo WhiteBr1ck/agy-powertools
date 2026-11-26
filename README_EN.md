@@ -174,6 +174,8 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | Always show conversation outline | On | Keeps the turn navigation rail visible in multi-turn chats |
 | Keep Overview open when switching chats | On | Preserves the right Overview panel open state across conversations |
 | Conversations per project | `Default (6)` | Controls visible chats per project in the sidebar (`Default (6)`, `1-10`, or `Show all`) |
+| Sidebar running border beam | Off | Draws a compositor-threaded flowing border beam around running sidebar chats (follows composer palette by default or picks its own, optional hide native four-dot spinner and Live preview; amber alert on waiting) |
+| Sidebar running conversations group | Off | Pins a collapsible Running section at the top of the sidebar showing all active chats, projects, active subagents, and waiting-for-confirmation alerts; hides when idle |
 | Taskbar unread badge | On | Shows `(N)` unread count in the window and taskbar title when background chats finish |
 
 ### Telemetry & progress
