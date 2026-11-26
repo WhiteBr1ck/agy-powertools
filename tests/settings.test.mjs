@@ -114,12 +114,24 @@ test('detectSystemLanguage selects zh-CN, zh-TW, or en across BCP-47 and POSIX u
   assert.equal(detectSystemLanguage({ locale: 'zh-TW', env: {} }), 'zh-TW');
   assert.equal(detectSystemLanguage({ locale: 'zh-Hant-HK', env: {} }), 'zh-TW');
   assert.equal(detectSystemLanguage({ locale: 'en-US', env: {} }), 'en');
+  assert.equal(detectSystemLanguage({ locale: 'fr-FR', env: {} }), 'fr');
+  assert.equal(detectSystemLanguage({ locale: 'fr-CA', env: {} }), 'fr');
   assert.equal(detectSystemLanguage({ locale: 'tr-TR', env: {} }), 'en');
   assert.equal(detectSystemLanguage({ locale: '', env: { LANG: 'en_GB.UTF-8' } }), 'en');
+  assert.equal(detectSystemLanguage({ locale: '', env: { LANG: 'fr_FR.UTF-8' } }), 'fr');
   assert.equal(detectSystemLanguage({ locale: '', env: { LC_ALL: 'zh_TW.UTF-8' } }), 'zh-TW');
   assert.equal(detectSystemLanguage({ locale: '', env: { LANG: 'zh_CN.UTF-8' } }), 'zh-CN');
   assert.equal(detectSystemLanguage({ locale: '', env: { LANG: 'zh_SG.UTF-8' } }), 'zh-CN');
   assert.equal(detectSystemLanguage({ locale: '', env: { LC_ALL: 'zh_HK.UTF-8' } }), 'zh-TW');
   assert.equal(detectSystemLanguage({ locale: '', env: { LC_ALL: 'zh_MO.UTF-8' } }), 'zh-TW');
   assert.equal(detectSystemLanguage({ locale: 'C.UTF-8', env: { LANG: 'zh_CN.UTF-8' } }), 'zh-CN');
+
+  const dir = mkdtempSync(join(tmpdir(), 'agy-lang-fr-'));
+  try {
+    const store = createSettingsStore(dir);
+    assert.equal(store.set({ language: 'fr' }).language, 'fr');
+    assert.equal(store.get().language, 'fr');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

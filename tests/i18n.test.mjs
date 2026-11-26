@@ -1,9 +1,10 @@
 import test from 'node:test';import assert from 'node:assert/strict';import{readFileSync,writeFileSync,mkdtempSync,rmSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';import vm from'node:vm';
 import{toZhTw}from'../lib/zh-tw.mjs';
+import{toFr}from'../lib/fr.mjs';
 import{renderAuxPaneHtml}from'../lib/sidecar-ui.mjs';
 import{formatRelativeTime,formatResetCountdown}from'../lib/account-helpers.mjs';
 import{createSettingsStore}from'../lib/settings.mjs';
-import{loadCustomI18n}from'../lib/native-host.mjs';
+import{loadCustomI18n,nativeSource,swarmI18nSource}from'../lib/native-host.mjs';
 test('native settings translations preserve product names and English input terminology',()=>{
  const document={nodeType:9,createTreeWalker:()=>({nextNode:()=>null}),querySelectorAll:()=>[]};
  const context=vm.createContext({document,NodeFilter:{SHOW_TEXT:4},MutationObserver:class{observe(){} disconnect(){}}});
@@ -267,4 +268,147 @@ test('custom-i18n.json loads additive user translations safely and slash command
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('French (fr) translates native Antigravity UI, Swarm, Powertools panels, and dynamic strings without middle dots', () => {
+  const makeNode = (value, matchedSelectors = []) => ({
+    nodeValue: value,
+    parentElement: {
+      closest: sel => matchedSelectors.some(m => sel.includes(m)) ? {} : null
+    }
+  });
+  const nodes = [
+    makeNode('Settings', ['.monaco-editor']),
+    makeNode('Settings', []),
+    makeNode('Fork Conversation', [])
+  ];
+  const document = {
+    nodeType: 9,
+    body: { nodeType: 1, getAttribute: () => null, closest: () => null, querySelectorAll: () => [] },
+    createTreeWalker: () => {
+      let i = 0;
+      return { nextNode: () => nodes[i++] || null };
+    },
+    querySelectorAll: () => []
+  };
+  const context = vm.createContext({
+    document,
+    NodeFilter: { SHOW_TEXT: 4 },
+    MutationObserver: class { observe() {} disconnect() {} },
+    __agyToZhTw: toZhTw,
+    __agyToFr: toFr
+  });
+  const i18nSrc = readFileSync('lib/native-i18n.js', 'utf8');
+  vm.runInContext(i18nSrc, context);
+  const t = context.__agyI18n.t;
+
+  // 1. Every native-i18n.js pair key must have a French translation without middle dots
+  const pairsCtx = {};
+  vm.runInNewContext(i18nSrc.slice(i18nSrc.indexOf('const pairs = ['), i18nSrc.indexOf('const zh=new Map(pairs)')) + 'globalThis.P = pairs;', pairsCtx);
+  for (const [enKey] of pairsCtx.P) {
+    const frVal = toFr(enKey);
+    assert.notEqual(frVal, null, `Missing French translation for native key: ${enKey}`);
+    assert.equal(frVal.includes('\u00b7'), false, `Unexpected middle dot in French translation for: ${enKey}`);
+  }
+
+  // 2. Every static en string in text(zh, en) / uiText(zh, en) across panels, UI, and SSH paste must translate cleanly
+  const extractStaticEn = (code) => {
+    const out = [];
+    const re = /\b(?:uiText|text)\s*\(/g;
+    let m;
+    while ((m = re.exec(code))) {
+      const prev = code[m.index - 1];
+      if (prev === '.' || /[a-zA-Z0-9_$]/.test(prev || '')) continue;
+      let i = m.index + m[0].length;
+      const skipWs = () => { while (i < code.length && /\s/.test(code[i])) i++; };
+      const readLit = () => {
+        const q = code[i];
+        if (q !== "'" && q !== '"' && q !== '`') return null;
+        const start = i++;
+        let hasExpr = false;
+        while (i < code.length) {
+          if (code[i] === '\\') { i += 2; continue; }
+          if (q === '`' && code[i] === '$' && code[i + 1] === '{') {
+            hasExpr = true;
+            i += 2;
+            let d = 1;
+            while (i < code.length && d > 0) {
+              if (code[i] === "'" || code[i] === '"' || code[i] === '`') { readLit(); continue; }
+              if (code[i] === '{') d++;
+              else if (code[i] === '}') d--;
+              i++;
+            }
+            continue;
+          }
+          if (code[i] === q) {
+            i++;
+            if (hasExpr) return { isTemplate: true };
+            const raw = code.slice(start, i);
+            const val = q === '`' ? raw.slice(1, -1).replace(/\\`/g, '`').replace(/\\n/g, '\n') : vm.runInNewContext(raw);
+            return { isTemplate: false, val };
+          }
+          i++;
+        }
+        return null;
+      };
+      skipWs(); const a1 = readLit(); skipWs();
+      if (!a1 || code[i] !== ',') continue;
+      i++; skipWs(); const a2 = readLit(); skipWs();
+      if (a2 && !a2.isTemplate && code[i] === ')') out.push(a2.val);
+    }
+    return out;
+  };
+  for (const file of ['lib/native-panels.js', 'lib/native-ui.js', 'lib/native-ssh-paste.mjs']) {
+    for (const enStr of extractStaticEn(readFileSync(file, 'utf8'))) {
+      const frVal = toFr(enStr);
+      assert.notEqual(frVal, null, `Missing French translation for ${file} string: ${enStr}`);
+      assert.equal(frVal.includes('\u00b7'), false, `Unexpected middle dot in ${file} translation for: ${enStr}`);
+    }
+  }
+
+  // 3. Key lookups (English & Chinese keys) and dynamic strings
+  assert.equal(t('Settings', 'fr'), 'Paramètres');
+  assert.equal(t('Interface Layout', 'fr'), 'Disposition de l’interface');
+  assert.equal(t('Thinking effort', 'fr'), 'Effort de réflexion');
+  assert.equal(t('Skills & Rules', 'fr'), 'Compétences et règles');
+  assert.equal(t('Board', 'fr'), 'Tableau');
+  assert.equal(t('语言', 'fr'), 'Langue');
+  assert.equal(t('紧凑排版', 'fr'), 'Mise en page compacte');
+  assert.equal(t('上下文窗口', 'fr'), 'Fenêtre de contexte');
+  assert.equal(t('Your Plan: Google AI Ultra', 'fr'), 'Votre forfait : Google AI Ultra');
+  assert.equal(t('Thought for 14s', 'fr'), 'Réflexion pendant 14 s');
+  assert.equal(t('Step 2 of 5', 'fr'), 'Étape 2 sur 5');
+  const workedFr = t(`Worked for 8m 28s \u00b7 4 updates`, 'fr');
+  assert.equal(workedFr, 'Durée : 8m 28s - 4 étapes');
+  assert.equal(workedFr.includes('\u00b7'), false);
+  const ovFr = t(`overview \u00b7 from the narrator\u2019s notes`, 'fr');
+  assert.equal(ovFr, 'Aperçu - notes du narrateur');
+  assert.equal(ovFr.includes('\u00b7'), false);
+  assert.equal(t('Resets in 3h 33m', 'fr'), 'Réinitialisation dans 3h 33m');
+  assert.equal(t('55% left', 'fr'), '55 % restant');
+  const coordFr = t(`Coordinator \u00b7 3 of 5 done \u00b7 Needs you`, 'fr');
+  assert.equal(coordFr, 'Coordinateur - 3 / 5 terminé - Action requise');
+  assert.equal(coordFr.includes('\u00b7'), false);
+  assert.equal(t('Yes, always allow downloads from github.com', 'fr'), 'Oui, toujours autoriser les téléchargements depuis github.com');
+
+  // 4. Helper functions, aux pane HTML, localizer DOM pass, and browser IIFE compilation
+  assert.equal(formatRelativeTime(0, 30000, 'fr'), 'À l’instant');
+  assert.equal(formatRelativeTime(0, 120000, 'fr'), 'il y a 2 min');
+  assert.equal(formatResetCountdown(7200000, 0, 'fr'), 'Réinitialisation dans 2h');
+  const html = renderAuxPaneHtml({ version: '2.16.4', language: 'fr' });
+  assert.match(html, /<html lang="fr">/);
+  assert.ok(html.includes('Redémarrer Antigravity pour activer Powertools'));
+
+  const loc = context.__agyLocalization;
+  loc.apply('fr', true);
+  assert.equal(nodes[0].nodeValue, 'Settings');
+  assert.equal(nodes[1].nodeValue, 'Paramètres');
+  assert.equal(nodes[2].nodeValue, 'Créer une branche');
+  loc.apply('en', true);
+  assert.equal(nodes[1].nodeValue, 'Settings');
+  assert.equal(nodes[2].nodeValue, 'Fork Conversation');
+  loc.dispose();
+
+  new vm.Script(nativeSource('vscode-file://vscode-app', ['B']));
+  new vm.Script(swarmI18nSource({ enabled: true, language: 'fr' }));
 });
