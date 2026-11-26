@@ -314,33 +314,53 @@ test('sidebar monitor decorates running rows with flowing beam, hides only 4-dot
   assert.match(css, /@media \(prefers-reduced-motion: no-preference\)/);
   assert.match(css, /@keyframes agy-sb-sweep/);
   assert.match(css, /translate3d\(104%,0,0\)/);
+  assert.match(css, /animation:agy-sb-sweep 2\.8s linear infinite/);
   assert.match(css, /\.agy-sb-fade\{/);
   assert.match(css, /mask-image:linear-gradient\(90deg,transparent 0%/);
+  assert.match(css, /\.agy-sb-beam-border\{[^}]*background:transparent;/);
   assert.match(css, /\.agy-sb-beam-layer\{[^}]*pointer-events:none;[^}]*z-index:20/);
   assert.match(css, /agy-sb-plume/);
   assert.match(css, /agy-sb-edge/);
+  assert.match(css, /var\(--agy-stop-5\)/);
+  assert.match(css, /data-agy-sb-palette="gemini"\][^{]*\{[^}]*#FA8C33[^}]*#34A853/);
+  assert.match(css, /data-agy-sb-palette="colorful"\][^{]*\{[^}]*#FA9E38/);
+  assert.match(css, /data-agy-sb-palette="quota"\]\[data-agy-sb-quota-tone="warning"\]/);
+  assert.match(css, /data-agy-sb-palette="quota"\]\[data-agy-sb-quota-tone="critical"\]/);
+  assert.match(css, /\.pt-run-list\{[^}]*padding:1px 0 2px;/);
+  assert.match(css, /\.pt-run-item\{[^}]*padding:6px 8px;/);
   // Must NEVER override position on native sidebar children (breaks Antigravity's absolute inset-0 row link)
   assert.doesNotMatch(css, /:not\(\.agy-sb-beam-layer\)\{[^}]*position:relative/);
   assert.doesNotMatch(css, /conic-gradient|offset-path|pt-run-head-dot|pt-run-pause-btn/);
   assert.match(css, /data-agy-sb-palette="aurora"/);
   assert.match(css, /data-agy-sb-palette="quota"/);
+  assert.equal(context.__agySidebarMonitorHelpers.expandPaletteStops(context.__agySidebarMonitorHelpers.PALETTE_DEFS.gemini).length, 6);
   assert.equal(context.__agySidebarMonitorHelpers.resolveEffectivePalette({ sidebarRunningBeamPalette: 'sync', composerWorkingBeamPalette: 'aurora' }), 'aurora');
   assert.equal(context.__agySidebarMonitorHelpers.resolveEffectivePalette({ sidebarRunningBeamPalette: 'sync', composerWorkingBeamPalette: 'quota' }), 'quota');
   assert.equal(context.__agySidebarMonitorHelpers.resolveEffectivePalette({ sidebarRunningBeamPalette: 'neon', composerWorkingBeamPalette: 'aurora' }), 'neon');
 
+  let liveQuotaTone = 'warning';
   const monitor = context.__agySidebarMonitor({
     document,
     adapter: { runningConversations: () => runningList, conversationDirectory: () => ({ byId: {} }) },
     options: () => opts,
     currentId: () => 'c-run',
     sidebarBeamPreview: () => preview,
+    quotaTone: () => liveQuotaTone,
     navigateToConversation: (id, proj) => navigated.push({ id, proj })
   });
 
-  // Verify sync palette tracks composerWorkingBeamPalette live
+  // Verify sync palette tracks composerWorkingBeamPalette and live quotaTone
+  opts = { ...opts, sidebarRunningBeamPalette: 'sync', composerWorkingBeamPalette: 'quota' };
+  monitor.sync(true);
+  assert.equal(documentElement.getAttribute('data-agy-sb-palette'), 'quota');
+  assert.equal(documentElement.getAttribute('data-agy-sb-quota-tone'), 'warning');
+  liveQuotaTone = 'critical';
+  monitor.sync();
+  assert.equal(documentElement.getAttribute('data-agy-sb-quota-tone'), 'critical');
   opts = { ...opts, sidebarRunningBeamPalette: 'sync', composerWorkingBeamPalette: 'aurora' };
   monitor.sync(true);
   assert.equal(documentElement.getAttribute('data-agy-sb-palette'), 'aurora');
+  assert.equal(documentElement.getAttribute('data-agy-sb-quota-tone'), null);
   opts = { ...opts, composerWorkingBeamPalette: 'neon' };
   monitor.sync();
   assert.equal(documentElement.getAttribute('data-agy-sb-palette'), 'neon');
@@ -497,6 +517,7 @@ test('Settings panel renders sidebar running beam palette, hide-spinner toggle, 
     Wz: ({ children }) => children
   });
   vm.runInContext(panelsSrc, ctx);
+  let panelQuotaTone = 'critical';
   const renderWith = opts => {
     const panels = ctx.__agyPanels({
       adapter: { router: () => ({ navigate() {} }) },
@@ -519,6 +540,7 @@ test('Settings panel renders sidebar running beam palette, hide-spinner toggle, 
       consumeScrollToAbout: () => false,
       beamPreview: () => false,
       setBeamPreview() {},
+      quotaTone: () => panelQuotaTone,
       request: async () => ({ status: 'idle' }),
       change: patch => { changes.push(patch); },
       sidebarBeamPreview: () => previewOn,
@@ -536,12 +558,26 @@ test('Settings panel renders sidebar running beam palette, hide-spinner toggle, 
     return expand(panels.Settings());
   };
 
-  const onTree = renderWith({ enabled: true, language: 'zh-CN', composerWorkingBeamPalette: 'aurora', sidebarRunningBeam: true, sidebarRunningBeamPalette: 'sync', sidebarHideNativeSpinner: true, sidebarRunningGroup: true, sidebarProjectLimit: 0 });
+  const onTree = renderWith({ enabled: true, language: 'zh-CN', composerWorkingBeam: true, composerWorkingBeamPalette: 'quota', sidebarRunningBeam: true, sidebarRunningBeamPalette: 'sync', sidebarHideNativeSpinner: true, sidebarRunningGroup: true, sidebarProjectLimit: 0 });
+  const panelStyleEl = document.head.children.find(el => el.dataset?.agyPanelStyle !== undefined);
+  assert.ok(panelStyleEl);
+  assert.match(panelStyleEl.textContent, /\.pt-bubble-panel\{padding:12px 12px 14px;/);
+  assert.match(panelStyleEl.textContent, /\.pt-proxy-banner\{padding:10px 12px;/);
+  assert.doesNotMatch(panelStyleEl.textContent, /\.pt-proxy-banner\{[^}]*border-top:/);
+  assert.match(panelStyleEl.textContent, /\.pt-proxy-fields\{padding:12px 12px 14px;/);
+  assert.doesNotMatch(panelStyleEl.textContent, /\.pt-proxy-fields\{[^}]*border-top:/);
+  assert.match(panelStyleEl.textContent, /\.pt-release-notes\{margin:0;padding:4px 12px 14px;/);
   const onNodes = collectNodes(onTree);
   assert.ok(onNodes.find(n => n.props?.['data-testid'] === 'agy-setting-sidebarRunningBeam'));
   assert.ok(onNodes.find(n => n.props?.['data-testid'] === 'agy-setting-row-sidebarRunningBeamPalette'));
   assert.ok(onNodes.find(n => n.props?.['data-testid'] === 'agy-setting-sidebarHideNativeSpinner'));
   assert.ok(onNodes.find(n => n.props?.['data-testid'] === 'agy-setting-sidebarRunningGroup'));
+  const sbStage = onNodes.find(n => n.props?.['data-testid'] === 'agy-sidebar-beam-stage');
+  const compStage = onNodes.find(n => n.props?.['data-testid'] === 'agy-composer-beam-stage');
+  assert.equal(sbStage?.props?.['data-palette'], 'quota');
+  assert.equal(compStage?.props?.['data-palette'], 'quota');
+  assert.equal(sbStage?.props?.style?.['--pt-bs-1'], '#EF4444');
+  assert.equal(compStage?.props?.style?.['--pt-bs-1'], '#EF4444');
   assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sidebar-beam-palette-sync')?.props?.['aria-pressed'], true);
   onNodes.find(n => n.props?.['data-testid'] === 'agy-sidebar-beam-palette-neon').props.onClick();
   assert.deepEqual(JSON.parse(JSON.stringify(changes)), [{ sidebarRunningBeamPalette: 'neon' }]);
