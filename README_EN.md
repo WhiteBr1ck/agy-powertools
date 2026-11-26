@@ -169,6 +169,7 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | --- | --- | --- |
 | Enable Powertools | On | Master switch; pauses all UI enhancements while keeping saved settings |
 | Language | `简体中文` | Choose `简体中文`, `繁體中文`, or `English` |
+| Local font | Empty (client font) | Use Installed fonts to list, search and choose a local font family, or enter one manually, then click Apply font. Applies to interface, code blocks and code previews; clear or Restore default to revert. Reports font access and detection errors without patching app files. Built-in terminal font adaptation is excluded |
 | Compact layout | On | Tightens line height (`1.4`), block spacing, and tool rows while keeping client font size |
 | Tint user message bubbles | Off | Adds a tint and border to user messages (Accent, 5 presets, custom color, and 10%-100% blend slider) |
 | Always show conversation outline | On | Keeps the turn navigation rail visible in multi-turn chats |

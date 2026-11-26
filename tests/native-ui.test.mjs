@@ -61,6 +61,168 @@ test('already-loaded injection initializes without waiting and disposes cleanly'
   assert.ok(p.nodes.every(n => !n.isConnected));
 });
 
+function fontPage(initial = {}) {
+  const p = page(true), properties = new Map(), writes = [];
+  let env, stored = { enabled: true, customFont: '', ...initial };
+  p.document.documentElement.style = { setProperty: (k, v) => properties.set(k, v), removeProperty: k => properties.delete(k) };
+  const create = p.document.createElement;
+  p.document.createElement = tag => {
+    if (tag !== 'canvas') return create(tag);
+    return { getContext: () => ({
+      font: '',
+      measureText() {
+        // 首个等宽基准恰好同宽，第二个基准仍能识别已安装字体。
+        return { width: this.font.includes('"Maple Mono NF CN"') ? 100 : this.font.includes('serif') ? 80 : 100 };
+      }
+    }) };
+  };
+  p.context.__agyPanels = value => { env = value; return { dispose() {} }; };
+  p.context.__agyNativeAdapter.installPage = () => true;
+  p.context.__agyInitialSettings = stored;
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    if (req.method === 'settings.set') { writes.push(req.settings); stored = { ...stored, ...req.settings }; }
+    queueMicrotask(() => p.context.__agyPowertoolsReceive(req.id, req.method.startsWith('settings.') ? stored : {}));
+  };
+  vm.runInContext(source, p.context);
+  return { ...p, properties, writes, env, setStored: patch => { stored = { ...stored, ...patch }; } };
+}
+
+test('本地字体保存后立即应用，清空、总开关和卸载均恢复客户端样式', async () => {
+  const p = fontPage();
+  await new Promise(resolve => setImmediate(resolve));
+  await p.env.change({ customFont: 'Maple Mono NF CN' });
+  assert.equal(p.env.settingsError(), '');
+  assert.equal(p.context.__agyPowertools.settings.customFont, 'Maple Mono NF CN');
+  assert.equal(p.properties.get('--agy-custom-font'), '"Maple Mono NF CN"');
+  assert.equal(p.document.documentElement.hasAttribute('data-agy-custom-font'), true);
+  await p.env.change({ enabled: false });
+  assert.equal(p.properties.has('--agy-custom-font'), false);
+  assert.equal(p.document.documentElement.hasAttribute('data-agy-custom-font'), false);
+  await p.env.change({ enabled: true });
+  assert.equal(p.properties.get('--agy-custom-font'), '"Maple Mono NF CN"');
+  await p.env.change({ customFont: '' });
+  assert.equal(p.properties.has('--agy-custom-font'), false);
+  await p.env.change({ customFont: 'Maple Mono NF CN' });
+  p.context.__agyPowertools.dispose();
+  assert.equal(p.properties.has('--agy-custom-font'), false);
+  assert.equal(p.document.documentElement.hasAttribute('data-agy-custom-font'), false);
+});
+
+test('不存在或格式错误的字体明确报错，不保存、不覆盖已生效字体', async () => {
+  const p = fontPage({ customFont: 'Maple Mono NF CN' });
+  await new Promise(resolve => setImmediate(resolve));
+  for (const customFont of ['Missing Font', 'Maple\nMono', 123]) {
+    await p.env.change({ customFont });
+    assert.match(p.env.customFontError(), /字体/);
+    assert.equal(p.writes.length, 0);
+    assert.equal(p.properties.get('--agy-custom-font'), '"Maple Mono NF CN"');
+  }
+  await p.env.change({ customFont: '' });
+  assert.equal(p.env.settingsError(), '');
+  p.context.__agyPowertools.dispose();
+});
+
+test('旧设置中的字体在本机不可用时显示错误，清空后可以恢复', async () => {
+  const p = fontPage({ customFont: 'Missing Font' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(p.env.customFontError(), /未检测到本地字体/);
+  assert.equal(p.document.documentElement.hasAttribute('data-agy-custom-font'), false);
+  await p.env.change({ customFont: '' });
+  assert.equal(p.env.settingsError(), '');
+  p.context.__agyPowertools.dispose();
+});
+
+test('字体检测错误不污染代理保存，语言切换及安装后同名重试可恢复', async () => {
+  const p = fontPage({ customFont: 'Missing Font' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(p.env.customFontError(), /未检测到/);
+  await p.env.change({ proxyUrl: 'http://127.0.0.1:7890', proxyEnabled: true });
+  assert.equal(p.env.settingsError(), '');
+  assert.equal(p.env.options().proxyUrl, 'http://127.0.0.1:7890');
+  await p.env.change({ language: 'en' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(p.env.customFontError(), /Local font/);
+  p.context.queryLocalFonts = async () => [{ family: 'Missing Font' }];
+  p.context.navigator = { permissions: { query: async () => ({ state: 'granted' }) } };
+  await p.env.change({ customFont: 'Missing Font' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(p.env.customFontError(), '');
+  assert.equal(p.document.documentElement.hasAttribute('data-agy-custom-font'), true);
+  p.context.__agyPowertools.dispose();
+});
+
+test('系统字体清单规范化去重，接受 Canvas 同宽的已安装字体，并保留读取错误', async () => {
+  const p = fontPage();
+  await new Promise(resolve => setImmediate(resolve));
+  p.context.queryLocalFonts = async () => [
+    { family: ' Inter ' }, { family: 'Inter' }, { family: 'System' },
+    { family: '' }, { family: 'bad\nfont' }, { family: 'x'.repeat(129) }, { family: null }
+  ];
+  const families = await p.env.loadLocalFonts();
+  assert.deepEqual(Array.from(families), ['Inter', 'System']);
+  await p.env.change({ customFont: 'inter' });
+  assert.equal(p.env.customFontError(), '');
+  assert.equal(p.env.options().customFont, 'inter');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(p.properties.get('--agy-custom-font'), '"inter"');
+  p.context.queryLocalFonts = async () => [];
+  await assert.rejects(p.env.loadLocalFonts, /未读取到/);
+  p.context.queryLocalFonts = async () => { throw new Error('权限被拒绝'); };
+  await assert.rejects(p.env.loadLocalFonts, /权限被拒绝/);
+  delete p.context.queryLocalFonts;
+  await assert.rejects(p.env.loadLocalFonts, /不支持读取/);
+  p.context.__agyPowertools.dispose();
+});
+
+test('权限接口异常或缺少用户手势时继续核验字形，并保留失败原因', async () => {
+  for (const mode of ['unsupported-name', 'missing-method', 'security-error']) {
+    const p = fontPage();
+    await new Promise(resolve => setImmediate(resolve));
+    p.context.queryLocalFonts = async () => { throw new Error('SecurityError: requires user activation'); };
+    p.context.navigator = { permissions: mode === 'missing-method' ? {} : {
+      query: async () => { if (mode === 'unsupported-name') throw new TypeError('Unsupported permission local-fonts'); return { state: 'granted' }; }
+    } };
+    await p.env.change({ customFont: 'Maple Mono NF CN' });
+    assert.equal(p.env.customFontError(), '');
+    assert.equal(p.properties.get('--agy-custom-font'), '"Maple Mono NF CN"');
+    if (mode !== 'missing-method') assert.match(p.env.customFontNotice(), /Unsupported permission|SecurityError/);
+    await p.env.change({ customFont: 'Missing Font' });
+    assert.match(p.env.customFontError(), /未检测到/);
+    if (mode !== 'missing-method') assert.match(p.env.customFontError(), /Unsupported permission|SecurityError/);
+    assert.equal(p.env.options().customFont, 'Maple Mono NF CN');
+    p.context.__agyPowertools.dispose();
+  }
+});
+
+test('await 字体保存返回后已清除旧运行时错误并完成样式同步', async () => {
+  const p = fontPage({ customFont: 'Missing Font' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(p.env.customFontError(), /未检测到/);
+  await p.env.change({ customFont: 'Maple Mono NF CN' });
+  assert.equal(p.env.customFontError(), '');
+  assert.equal(p.properties.get('--agy-custom-font'), '"Maple Mono NF CN"');
+  p.context.__agyPowertools.dispose();
+});
+
+test('异步字体检测完成后不覆盖已关闭的插件，也不会在卸载后重新加样式', async () => {
+  const p = fontPage();
+  await new Promise(resolve => setImmediate(resolve));
+  let resolveFonts;
+  p.context.queryLocalFonts = () => new Promise(resolve => { resolveFonts = resolve; });
+  p.context.navigator = { permissions: { query: async () => ({ state: 'granted' }) } };
+  // 通过外部同步设置触发检测，而非阻塞保存中的验证。
+  p.setStored({ customFont: 'Inter' });
+  await p.env.change({ language: 'en' });
+  await new Promise(resolve => setImmediate(resolve));
+  await p.env.change({ enabled: false });
+  resolveFonts([{ family: 'Inter' }]);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(p.properties.has('--agy-custom-font'), false);
+  p.context.__agyPowertools.dispose();
+  assert.equal(p.document.documentElement.hasAttribute('data-agy-custom-font'), false);
+});
+
 test('multi-pane conversations with multiple composers stay healthy without triggering reload loops', () => {
   const p = page(true);
   p.context.location.pathname = '/c/conv-1';

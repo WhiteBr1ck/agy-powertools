@@ -274,7 +274,7 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     URL,
     window: { addEventListener() {}, removeEventListener() {} },
     location: { pathname: '/' },
-    document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} } },
+    document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} }, querySelector: hooks.querySelector || (() => null) },
     setInterval: hooks.setInterval || (() => 1),
     clearInterval: hooks.clearInterval || (() => {}),
     UP: 'row',
@@ -286,7 +286,7 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     dq: ({ name }) => ({ type: 'icon', props: { name }, children: [] }),
     Sy: 'tooltip',
     navigator: hooks.navigator ?? { clipboard: { writeText: async text => { hooks.onClipboardWrite?.(text); } } },
-    HC: 'popover',
+    HC: hooks.Popover || 'popover',
     IC: 'popover-trigger',
     JC: 'popover-content',
     kT: 'select',
@@ -1867,6 +1867,25 @@ test('createAccountsStore tracks onboarding acceptance from app_storage.json and
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('快捷浮窗内的字体弹层搜索、重新读取及 Escape 不关闭外层', () => {
+  let nestedOpen = true;
+  const ui = createPanelHarness(null, { multiAccount: false }, {
+    Popover: props => ({ type: 'popover', props, children: props.children }),
+    querySelector: selector => nestedOpen && selector.includes('[data-testid="agy-font-picker"]') ? {} : null
+  });
+  const popover = ui.findAll(ui.renderQuickPopover(), node => node.type === 'popover')[0];
+  popover.props.onOpenChange(true);
+  for (const type of ['pointerdown', 'keydown']) {
+    let canceled = false;
+    popover.props.onOpenChange(false, { event: { type, key: 'Escape', target: { closest: () => null } }, cancel: () => { canceled = true; } });
+    assert.equal(canceled, true);
+    assert.equal(ui.findAll(ui.renderQuickPopover(), node => node.type === 'popover')[0].props.open, true);
+  }
+  nestedOpen = false;
+  popover.props.onOpenChange(false, { event: { target: { closest: () => null } } });
+  assert.equal(ui.findAll(ui.renderQuickPopover(), node => node.type === 'popover')[0].props.open, false);
 });
 
 test('Sidebar badge, QuickPopover info dot, and About toggles reflect discovered updates cleanly without middle dots (Issue #45)', () => {

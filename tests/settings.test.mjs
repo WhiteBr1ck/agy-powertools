@@ -10,6 +10,15 @@ test('settings persist, merge safely, and reject unknown options without changin
   try {
     const store = createSettingsStore(directory);
     assert.deepEqual(store.get(), DEFAULT_SETTINGS);
+    store.set({ customFont: '  Maple Mono NF CN  ' });
+    assert.equal(createSettingsStore(directory).get().customFont, 'Maple Mono NF CN');
+    const fontBefore = readFileSync(join(directory, 'settings.json'), 'utf8');
+    for (const customFont of [null, true, 123, 'x'.repeat(129), 'Maple\nMono', 'Maple\u0000Mono']) {
+      assert.throws(() => store.set({ customFont }), /设置/);
+      assert.equal(readFileSync(join(directory, 'settings.json'), 'utf8'), fontBefore);
+    }
+    store.set({ customFont: '' });
+    assert.equal(store.get().customFont, '');
     store.set({ compact: false, timing: false });
     assert.equal(createSettingsStore(directory).get().compact, false);
     assert.equal(store.get().userBubbleTint, false);
