@@ -2165,3 +2165,250 @@ test('auto-check update banner shows one-click update/dismiss and optional autoI
 
   ctx.__agyPowertools.dispose();
 });
+
+test('management Page keeps header and tabs sticky on scroll, toggles scrolled border, and resets scroll on tab switch', () => {
+  const panelsCode = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
+  const styles = [];
+  const states = [];
+  const refs = [];
+  const effects = [];
+  const resizeObservers = [];
+  let stateIdx = 0;
+  let refIdx = 0;
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    Fragment: 'fragment',
+    useId: () => 'id-1',
+    useState: init => {
+      const i = stateIdx++;
+      if (!(i in states)) states[i] = typeof init === 'function' ? init() : init;
+      return [states[i], val => { states[i] = typeof val === 'function' ? val(states[i]) : val; }];
+    },
+    useRef: init => {
+      const i = refIdx++;
+      if (!(i in refs)) refs[i] = { current: init };
+      return refs[i];
+    },
+    useEffect: (fn, deps) => { effects.push({ fn, deps }); },
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  const wrapTag = name => ({ children, ...p }) => React.createElement(name, p, ...(Array.isArray(children) ? children : [children]));
+  let wrapHeight = 66.4;
+  const ctx = vm.createContext({
+    React,
+    Intl,
+    URL,
+    ResizeObserver: class MockResizeObserver {
+      constructor(cb) {
+        this.cb = cb;
+        this.observed = [];
+        this.disconnected = false;
+        resizeObservers.push(this);
+      }
+      observe(el) { this.observed.push(el); }
+      disconnect() { this.disconnected = true; }
+      trigger() { this.cb([{ target: this.observed[0] }], this); }
+    },
+    document: {
+      createElement: tag => ({ tagName: tag, dataset: {}, textContent: '', remove() {} }),
+      head: { append: node => styles.push(node) }
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    __agyDashboard: {
+      dateRange: () => ({ preset: 'weeklyQuota', start: 0, end: 1, activePools: [], status: 'unstarted' }),
+      summarizeRequests: () => ({ requests: [], success: 0, errors: 0, tokens: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0, cost: 0, priced: 0, points: [], models: [] }),
+      distributionModels: () => [],
+      subscriptionIdentity: () => ({ family: 'pro', style: 'pro', label: 'Pro' }),
+      annotateCacheAnomalies: () => new Map()
+    },
+    setInterval: () => 1,
+    clearInterval: () => {},
+    Uy: 'button',
+    Sy: 'tooltip',
+    dq: ({ name }) => ({ type: 'icon', props: { name }, children: [] }),
+    kT: wrapTag('kT'),
+    lT: wrapTag('lT'),
+    mT: wrapTag('mT'),
+    nT: wrapTag('nT'),
+    HC: wrapTag('HC'),
+    IC: wrapTag('IC'),
+    JC: wrapTag('JC'),
+    VP: wrapTag('VP'),
+    TP: wrapTag('TP'),
+    UP: wrapTag('UP'),
+    XP: wrapTag('XP')
+  });
+  vm.runInContext(panelsCode, ctx);
+  let mockDashboard = null;
+  const panels = ctx.__agyPanels({
+    t: v => v,
+    options: () => ({ enabled: true, titlebarQuickPanel: true, language: 'zh-CN', multiAccount: false }),
+    dashboard: () => mockDashboard,
+    loadDashboard: () => Promise.resolve(null),
+    subscribe: () => () => {},
+    revision: () => 0,
+    consumeRequestedTab: () => '',
+    state: () => null,
+    capabilities: () => ({ models: [] })
+  });
+
+  assert.equal(styles.length, 1);
+  const css = styles[0].textContent;
+  assert.match(css, /\.pt-header-wrap\{[^}]*position:sticky;top:0;z-index:20;/);
+  assert.match(css, /\.pt-header-wrap\[data-scrolled=true\]\{border-bottom-color:var\(--border\)\}/);
+  assert.match(css, /\.pt-page\[data-sticky-filter=true\] \.pt-header-wrap\[data-scrolled=true\]\{border-bottom-color:transparent\}/);
+  assert.match(css, /\.pt-page \.pt-filter-bar\{[^}]*position:sticky;top:calc\(var\(--pt-header-h,66px\) - 1px\);z-index:19;[^}]*backdrop-filter:blur\(8px\);/);
+  assert.match(css, /\.pt-page\[data-sticky-filter=true\]\[data-scrolled=true\] \.pt-filter-bar\{border-bottom-color:var\(--border\)\}/);
+  assert.match(css, /\.pt-page\{[^}]*scroll-padding-top:76px;/);
+  assert.match(css, /\.pt-page\[data-sticky-filter=true\]\{scroll-padding-top:calc\(var\(--pt-header-h,66px\) \+ 64px\)\}/);
+  assert.doesNotMatch(css, /\.pt-qp[^{]*\.pt-filter-bar/);
+
+  stateIdx = 0;
+  refIdx = 0;
+  effects.length = 0;
+  const tree = panels.Page();
+  assert.equal(tree.props['data-testid'], 'agy-management-page');
+  assert.equal(tree.props.className, 'pt-page');
+  assert.equal(tree.props['data-sticky-filter'], 'true');
+  const [headerWrap, content] = tree.children;
+  assert.equal(headerWrap.props['data-testid'], 'agy-management-header');
+  assert.equal(headerWrap.props.className, 'pt-header-wrap');
+  assert.equal(content.props.className, 'pt-content');
+
+  const pageListeners = new Map();
+  const pageAttrs = new Set();
+  const cssVars = new Map();
+  const pageEl = {
+    scrollTop: 0,
+    style: {
+      setProperty: (k, v) => cssVars.set(k, v),
+      getPropertyValue: k => cssVars.get(k) || ''
+    },
+    toggleAttribute: (name, force) => {
+      if (force === undefined ? !pageAttrs.has(name) : force) pageAttrs.add(name);
+      else pageAttrs.delete(name);
+    },
+    hasAttribute: name => pageAttrs.has(name),
+    addEventListener: (type, fn) => {
+      if (!pageListeners.has(type)) pageListeners.set(type, []);
+      pageListeners.get(type).push(fn);
+    },
+    removeEventListener: (type, fn) => {
+      const list = pageListeners.get(type) || [];
+      const idx = list.indexOf(fn);
+      if (idx >= 0) list.splice(idx, 1);
+    }
+  };
+  const wrapAttrs = new Set();
+  const headerWrapEl = {
+    getBoundingClientRect: () => ({ height: wrapHeight }),
+    toggleAttribute: (name, force) => {
+      if (force === undefined ? !wrapAttrs.has(name) : force) wrapAttrs.add(name);
+      else wrapAttrs.delete(name);
+    },
+    hasAttribute: name => wrapAttrs.has(name)
+  };
+  tree.props.ref.current = pageEl;
+  headerWrap.props.ref.current = headerWrapEl;
+
+  const cleanups = effects.map(e => e.fn()).filter(fn => typeof fn === 'function');
+  assert.equal(pageListeners.get('scroll')?.length, 1);
+  assert.equal(resizeObservers.length, 1);
+  assert.deepEqual(resizeObservers[0].observed, [headerWrapEl]);
+  assert.equal(cssVars.get('--pt-header-h'), '66px');
+  assert.equal(pageEl.hasAttribute('data-scrolled'), false);
+  assert.equal(headerWrapEl.hasAttribute('data-scrolled'), false);
+
+  // ResizeObserver updates --pt-header-h when header wraps at narrow widths
+  wrapHeight = 104.2;
+  resizeObservers[0].trigger();
+  assert.equal(cssVars.get('--pt-header-h'), '104px');
+
+  pageEl.scrollTop = 48;
+  for (const fn of pageListeners.get('scroll')) fn();
+  assert.equal(pageEl.hasAttribute('data-scrolled'), true);
+  assert.equal(headerWrapEl.hasAttribute('data-scrolled'), true);
+
+  pageEl.scrollTop = 2;
+  for (const fn of pageListeners.get('scroll')) fn();
+  assert.equal(pageEl.hasAttribute('data-scrolled'), false);
+  assert.equal(headerWrapEl.hasAttribute('data-scrolled'), false);
+
+  // Switching tabs resets scrollTop and clears data-scrolled on both page and headerWrap
+  pageEl.scrollTop = 120;
+  for (const fn of pageListeners.get('scroll')) fn();
+  assert.equal(pageEl.hasAttribute('data-scrolled'), true);
+  assert.equal(headerWrapEl.hasAttribute('data-scrolled'), true);
+  const headerNode = headerWrap.children[0];
+  const toolbarNode = headerNode.children[1];
+  const tabsComp = toolbarNode.children[0];
+  const tabsTree = tabsComp.type(tabsComp.props);
+  const requestsBtn = tabsTree.children.find(c => c.props?.['data-testid'] === 'agy-tab-requests');
+  assert.ok(requestsBtn);
+  requestsBtn.props.onClick();
+  assert.equal(states[0], 'requests');
+  assert.equal(pageEl.scrollTop, 0);
+  assert.equal(pageEl.hasAttribute('data-scrolled'), false);
+  assert.equal(headerWrapEl.hasAttribute('data-scrolled'), false);
+
+  // Switching to settings clears data-sticky-filter; overview/requests/errors keep it and render .pt-filter-bar
+  mockDashboard = { requests: [], errors: [], activeAccountEmail: '' };
+  const findByTestId = (node, tid) => {
+    if (!node || typeof node !== 'object') return null;
+    if (node.props?.['data-testid'] === tid) return node;
+    for (const child of Array.isArray(node.children) ? node.children : [node.children]) {
+      const hit = findByTestId(child, tid);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const renderTab = tabName => {
+    states[0] = tabName;
+    stateIdx = 0;
+    refIdx = 0;
+    return panels.Page();
+  };
+  const reqPage = renderTab('requests');
+  assert.equal(reqPage.props['data-sticky-filter'], 'true');
+  const reqComp = reqPage.children[1].children[1].children[0];
+  stateIdx = 10;
+  const reqTree = reqComp.type(reqComp.props);
+  assert.match(findByTestId(reqTree, 'agy-requests-filter-bar')?.props?.className || '', /\bpt-filter-bar\b/);
+
+  const errPage = renderTab('errors');
+  assert.equal(errPage.props['data-sticky-filter'], 'true');
+  const errComp = errPage.children[1].children[1].children[0];
+  stateIdx = 20;
+  const errTree = errComp.type(errComp.props);
+  assert.match(findByTestId(errTree, 'agy-errors-filter-bar')?.props?.className || '', /\bpt-filter-bar\b/);
+
+  const ovPage = renderTab('overview');
+  assert.equal(ovPage.props['data-sticky-filter'], 'true');
+  const ovComp = ovPage.children[1].children[1].children[0];
+  stateIdx = 30;
+  const ovTree = ovComp.type(ovComp.props);
+  assert.match(findByTestId(ovTree, 'agy-overview-filter-bar')?.props?.className || '', /\bpt-filter-bar\b/);
+
+  const settingsPage = renderTab('settings');
+  assert.equal(settingsPage.props['data-sticky-filter'], undefined);
+
+  // QuickPopover uses .pt-qp / .pt-qp-scroll rather than .pt-page, keeping sticky filter bars scoped to .pt-page only
+  stateIdx = 50;
+  refIdx = 50;
+  let qpTree = panels.QuickPopover();
+  qpTree.children[0].props.onOpenChange(true);
+  stateIdx = 50;
+  refIdx = 50;
+  qpTree = panels.QuickPopover();
+  const qpCard = qpTree.children[0].children[1].children[0];
+  assert.equal(qpCard.props.className, 'pt-qp');
+  assert.equal(qpCard.props['data-sticky-filter'], undefined);
+  assert.equal(qpCard.children[1].props['data-testid'], 'agy-quick-body');
+  assert.equal(qpCard.children[1].props.className, 'pt-qp-scroll');
+  assert.equal(findByTestId(qpTree, 'agy-management-page'), null);
+
+  for (const cleanup of cleanups) cleanup();
+  assert.equal(pageListeners.get('scroll')?.length, 0);
+  assert.equal(resizeObservers[0].disconnected, true);
+  panels.dispose();
+});
