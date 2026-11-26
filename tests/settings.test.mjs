@@ -58,6 +58,10 @@ test('settings persist, merge safely, and reject unknown options without changin
     assert.equal(store.get().subagentTelemetry, true);
     store.set({ subagentTelemetry: false }); assert.equal(store.get().subagentTelemetry, false);
     store.set({ subagentTelemetry: true }); assert.equal(store.get().subagentTelemetry, true);
+    assert.equal(DEFAULT_SETTINGS.turnMeta, true);
+    assert.equal(store.get().turnMeta, true);
+    store.set({ turnMeta: false }); assert.equal(store.get().turnMeta, false);
+    store.set({ turnMeta: true }); assert.equal(store.get().turnMeta, true);
     assert.equal(store.get().multiAccount, false);
     assert.equal(store.get().accountSwitcher, true);
     assert.equal(store.get().accountViewMode, 'list');
@@ -99,7 +103,7 @@ test('settings persist, merge safely, and reject unknown options without changin
     store.set({contextLimit:256000});assert.equal(store.get().contextLimit,256000);
     store.set({contextLimit:0});assert.equal(store.get().contextLimit,0);
     const before = readFileSync(join(directory, 'settings.json'), 'utf8');
-    for (const value of [{ compact: 'false' }, { userBubbleTint: 'yes' }, { userBubblePreset: 'neon' }, { userBubbleColor: 'red' }, { userBubbleColor: '#123;color:red' }, { userBubbleStrength: 5 }, { userBubbleStrength: 105 }, { userBubbleStrength: 20.5 }, { sessionSearch: 'yes' }, { composerQuotaHaloWindow: '1d' }, { unknown: true }, { toString: false }, {language:'invalid'}, {overviewRange:'custom'}, {overviewRange:'invalid'}, {pricingMode:'batch'}, {pricingMode:true}, {accountViewMode:'grid'}, {accountQuotaWindow:'1h'}, {proxyUrl:'ftp://127.0.0.1:21'}, {proxyUrl:'http://127.0.0.1:7897;calc'}, {proxyBypass:'localhost"bad'}, {contextLimit:999999}, []]) assert.throws(() => store.set(value), /设置/);
+    for (const value of [{ compact: 'false' }, { turnMeta: 'yes' }, { userBubbleTint: 'yes' }, { userBubblePreset: 'neon' }, { userBubbleColor: 'red' }, { userBubbleColor: '#123;color:red' }, { userBubbleStrength: 5 }, { userBubbleStrength: 105 }, { userBubbleStrength: 20.5 }, { sessionSearch: 'yes' }, { composerQuotaHaloWindow: '1d' }, { unknown: true }, { toString: false }, {language:'invalid'}, {overviewRange:'custom'}, {overviewRange:'invalid'}, {pricingMode:'batch'}, {pricingMode:true}, {accountViewMode:'grid'}, {accountQuotaWindow:'1h'}, {proxyUrl:'ftp://127.0.0.1:21'}, {proxyUrl:'http://127.0.0.1:7897;calc'}, {proxyBypass:'localhost"bad'}, {contextLimit:999999}, []]) assert.throws(() => store.set(value), /设置/);
     assert.equal(readFileSync(join(directory, 'settings.json'), 'utf8'), before);
     store.set(DEFAULT_SETTINGS); assert.deepEqual(store.get(), DEFAULT_SETTINGS);
   } finally { rmSync(directory, { recursive: true, force: true }); }

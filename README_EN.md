@@ -191,6 +191,7 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | Working composer border beam | Off | Animates a smooth border beam around the composer while working (zero idle cost), transitions cleanly with the quota halo, with 6 palettes and Live preview |
 | Subagent context & telemetry | On | Shows per-subagent model, context usage, tokens, cache hit rate, speed, and cost |
 | Turn duration / Expand tools | On | Shows total duration on finished turns and expands tool details on click |
+| Turn footer telemetry | On | Displays per-turn model, cache hit rate, and input/output tokens in finished reply footers with full breakdown on hover |
 
 ### Enhancements, Accounts, Proxy & Experimental Context
 
