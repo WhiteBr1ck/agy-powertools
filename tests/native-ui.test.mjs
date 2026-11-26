@@ -1169,6 +1169,82 @@ test('SSH command paste observes setting changes without reinstalling its listen
   p.context.__agyPowertools.dispose();
 });
 
+test('sidebar folder drop observes setting changes, checks local Electron support, excludes SSH windows, and initializes global toast via sidebar', async () => {
+  const p = page(true);
+  const settings = { enabled: true };
+  p.context.__agyInitialSettings = settings;
+  let change, dropOpts, installs = 0;
+  const createProjectCalls = [];
+  p.context.electronNative = { getPathForFile: f => f?.mockPath || '' };
+  p.context.__agyNativeAdapter.installPage = () => true;
+  p.context.__agyNativeAdapter.createProjectsFromDroppedEntries = (entries, opts) => {
+    createProjectCalls.push({ entries, opts });
+    return { created: entries, existing: [], skippedFiles: 0, pinned: Boolean(opts?.pin) };
+  };
+  p.context.__agyPanels = env => { change = env.change; return { Page: () => null, Sidebar: () => null, dispose() {} }; };
+  p.context.installSidebarFolderDrop = (_document, opts) => { dropOpts = opts; installs++; };
+  p.context.__agyPowertoolsHost = raw => {
+    const { id, method, settings: patch } = JSON.parse(raw);
+    if (method === 'settings.set') Object.assign(settings, patch);
+    queueMicrotask(() => p.context.__agyPowertoolsReceive?.(id, { ...settings }));
+  };
+  vm.runInContext(source, p.context);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(installs, 1);
+  assert.equal(dropOpts.enabled(), true);
+  assert.equal(dropOpts.pinProject(), false);
+  assert.equal(dropOpts.isSupported(), true);
+  assert.equal(dropOpts.getPathForFile({ mockPath: '/Users/alice/app' }), '/Users/alice/app');
+  await change({ sidebarFolderDropPin: true });
+  assert.equal(dropOpts.pinProject(), true);
+  dropOpts.createProjects([{ path: '/Users/alice/app' }], { pin: true });
+  assert.deepEqual(createProjectCalls.at(-1)?.opts, { pin: true });
+  const styleNode = p.nodes.find(n => 'agyDensityStyle' in (n.dataset || {}));
+  assert.match(styleNode?.textContent || '', /@keyframes agy-project-drop-highlight/);
+  assert.match(styleNode?.textContent || '', /\[data-agy-project-highlight="true"\]/);
+  await change({ sidebarFolderDrop: false });
+  assert.equal(dropOpts.enabled(), false);
+  await change({ sidebarFolderDrop: true });
+  assert.equal(dropOpts.enabled(), true);
+  p.context.sshRemote = { kind: 'ssh' };
+  assert.equal(dropOpts.isSupported(), false);
+  p.context.sshRemote = { kind: 'local' };
+  assert.equal(dropOpts.isSupported(), true);
+  delete p.context.electronNative;
+  assert.equal(dropOpts.isSupported(), false);
+  p.context.__agyPowertools.dispose();
+
+  // Verify SidebarEntry initializes global toast even without a mounted conversation composer
+  const pToast = page(true);
+  const toasts = [];
+  const custLink = { isConnected: true, nextSibling: null, parentElement: { insertBefore(n) { n.isConnected = true; } } };
+  pToast.document.querySelector = sel => sel === 'a[href="/customizations"]' ? custLink : null;
+  pToast.context.electronNative = { getPathForFile: f => f?.mockPath || '' };
+  pToast.context.React = {
+    createElement: (type, props, ...children) => ({ type, props, children }),
+    useEffect: fn => { fn(); }
+  };
+  pToast.context.ReactDOM = {
+    createRoot: () => ({
+      render(tree) {
+        if (typeof tree?.type === 'function') tree.type(tree.props || {});
+      },
+      unmount() {}
+    })
+  };
+  pToast.context.um = () => payload => toasts.push(payload);
+  let sidebarDropOpts;
+  pToast.context.installSidebarFolderDrop = (_document, opts) => { sidebarDropOpts = opts; };
+  pToast.context.__agyNativeAdapter.wrap = el => el;
+  pToast.context.__agyNativeAdapter.installPage = () => true;
+  pToast.context.__agyPanels = () => ({ Page: () => null, Sidebar: () => null, dispose() {} });
+  pToast.context.__agyInitialSettings = { enabled: true };
+  vm.runInContext(source, pToast.context);
+  sidebarDropOpts.notify({ title: 'Project created', message: 'demo' });
+  assert.deepEqual(toasts, [{ title: 'Project created', message: 'demo' }]);
+  pToast.context.__agyPowertools.dispose();
+});
+
 test('long-conversation mount skips redundant document style writes, skips unchanged root renders, and defers during IME/touch', async () => {
   const p = page(true);
   let styleWrites = 0;
