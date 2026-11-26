@@ -28,12 +28,8 @@ test('native settings translations preserve product names and English input term
  assert.equal(t('Turbo','zh-CN'),'Turbo');assert.equal(t('当前会话','en'),'Current conversation');
 });
 
-test('sidebar display menu labels translate in Simplified and Traditional Chinese (Issue #79)', () => {
-  const document = { nodeType: 9, createTreeWalker: () => ({ nextNode: () => null }), querySelectorAll: () => [] };
-  const context = vm.createContext({ document, NodeFilter: { SHOW_TEXT: 4 }, MutationObserver: class { observe() {} disconnect() {} }, __agyToZhTw: toZhTw });
-  vm.runInContext(readFileSync('lib/native-i18n.js', 'utf8'), context);
-  const t = context.__agyI18n.t;
-  for (const [english, simplified, traditional] of [
+test('sidebar display menu labels translate without changing matching text outside menus (Issue #79)', () => {
+  const labels = [
     ['Project', '项目', '專案'],
     ['Sort Conversations', '会话排序', '會話排序'],
     ['Sort Projects', '项目排序', '專案排序'],
@@ -42,12 +38,29 @@ test('sidebar display menu labels translate in Simplified and Traditional Chines
     ['Subtitles', '副标题', '副標題'],
     ['Decorations', '状态标记', '狀態標記'],
     ['Pull Requests', '拉取请求', '拉取請求']
-  ]) {
-    assert.equal(t(english, 'zh-CN'), simplified, english);
-    assert.equal(t(english, 'zh-TW'), traditional, english);
-    assert.equal(t(english, 'en'), english);
+  ];
+  const makeNodes = inMenu => labels.map(([english]) => ({
+    nodeValue: english,
+    parentElement: { closest: selector => inMenu && selector === '[role="menu"]' ? {} : null }
+  }));
+  const menuItems = makeNodes(true), titles = makeNodes(false);
+  const document = {
+    nodeType: 9,
+    createTreeWalker: () => {
+      const nodes = [...menuItems, ...titles].values();
+      return { nextNode: () => nodes.next().value };
+    },
+    querySelectorAll: () => []
+  };
+  const context = vm.createContext({ document, NodeFilter: { SHOW_TEXT: 4 }, MutationObserver: class { observe() {} disconnect() {} }, __agyToZhTw: toZhTw });
+  vm.runInContext(readFileSync('lib/native-i18n.js', 'utf8'), context);
+  for (const [locale, index] of [['zh-CN', 1], ['zh-TW', 2], ['en', 0]]) {
+    context.__agyLocalization.apply(locale, false);
+    assert.deepEqual(menuItems.map(node => node.nodeValue), labels.map(label => label[index]));
+    assert.deepEqual(titles.map(node => node.nodeValue), labels.map(([english]) => english));
   }
-  assert.equal(t('项目', 'en'), 'Projects');
+  assert.equal(context.__agyI18n.t('项目', 'en'), 'Projects');
+  assert.equal(context.__agyI18n.t('Pull Requests', 'zh-CN'), 'Pull Requests');
 });
 
 test('Traditional Chinese (zh-TW) uses Taiwan IT terminology, converts UI strings cleanly, and persists in settings',()=>{
