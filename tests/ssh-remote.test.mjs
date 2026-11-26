@@ -220,6 +220,37 @@ test('createRemoteTelemetryBridge runs in-memory worker over child stdio, tolera
     await bridge.close();
   }
 
+  // Verify remote worker also merges ~/.gemini/antigravity-cli when ANTIGRAVITY_APP_DATA_DIR points to ~/.gemini/antigravity
+  const remoteGeminiAppDir = join(dir, '.gemini', 'antigravity');
+  const remoteGeminiCliDir = join(dir, '.gemini', 'antigravity-cli');
+  seedConversationFixture(remoteGeminiAppDir, 'remote-app-conv', 'Remote desktop prompt');
+  seedConversationFixture(remoteGeminiCliDir, 'remote-cli-conv', 'Remote CLI prompt');
+  const cliBridge = createRemoteTelemetryBridge({
+    userDataDir,
+    connectTimeoutMs: 5000,
+    requestTimeoutMs: 5000,
+    spawnProcess: (_command, _args, opts) => {
+      const child = spawn(process.execPath, ['--no-warnings', '-e', harnessScript], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...opts.env, ANTIGRAVITY_APP_DATA_DIR: remoteGeminiAppDir }
+      });
+      childRefs.push(child);
+      return child;
+    }
+  });
+  try {
+    const [mergedDash, appOnlySearch] = await Promise.all([
+      cliBridge.dashboard('homelab', { force: true }),
+      cliBridge.search('homelab', { query: 'prompt' })
+    ]);
+    assert.equal(mergedDash.totalRequests, 2);
+    assert.deepEqual(new Set(mergedDash.requests.map(r => r.conversationId)), new Set(['remote-app-conv', 'remote-cli-conv']));
+    assert.equal(appOnlySearch.results.length, 1);
+    assert.equal(appOnlySearch.results[0].conversationId, 'remote-app-conv');
+  } finally {
+    await cliBridge.close();
+  }
+
   for (const child of childRefs) {
     assert.ok(child.exitCode !== null || child.signalCode !== null, 'worker child should exit cleanly on close()');
   }
