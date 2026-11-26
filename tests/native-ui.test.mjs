@@ -2165,3 +2165,111 @@ test('auto-check update banner shows one-click update/dismiss and optional autoI
 
   ctx.__agyPowertools.dispose();
 });
+
+test('native-ui retries applyOptions after transient boot failure and re-applies adapter options on remote settingsChanged (Issue #66)', async () => {
+  const source = readFileSync(new URL('../lib/native-ui.js', import.meta.url), 'utf8');
+  const intervals = [];
+  let failSetEnabledCount = 3; // Fail initial boot applyOptions + mount() refresh + queued startup refresh
+  const applied = { enabled: null, stageUpdates: null, efficientIO: null, contextLimit: null, sidebarProjectLimit: null };
+  let remoteSettings = { enabled: true, stageUpdates: true, efficientIO: false, contextLimit: 500000, sidebarProjectLimit: 5 };
+  let settingsGetCount = 0;
+
+  const ctx = vm.createContext({
+    document: {
+      readyState: 'complete',
+      visibilityState: 'visible',
+      title: 'Antigravity (SSH: remote-box)',
+      head: { append() {}, appendChild() {}, querySelector: () => null },
+      body: { append() {}, appendChild() {}, querySelector: () => null, querySelectorAll: () => [] },
+      documentElement: { toggleAttribute() {}, removeAttribute() {}, setAttribute() {}, style: { setProperty() {}, removeProperty() {} } },
+      createElement: () => ({ dataset: {}, style: {}, remove() {} }),
+      addEventListener() {},
+      querySelector: () => null,
+      querySelectorAll: () => []
+    },
+    window: { addEventListener() {}, removeEventListener() {} },
+    navigator: { userAgent: 'Antigravity/2.35.2' },
+    location: { pathname: '/c/conv-ssh-66' },
+    AbortController,
+    React: { createElement: () => null, Fragment: 'fragment', useSyncExternalStore: (_, g) => g() },
+    ReactDOM: { createRoot: () => ({ render() {}, unmount() {} }) },
+    HC: () => null,
+    __agyInitialSettings: { ...remoteSettings },
+    __agyNativeAdapter: {
+      wrap: el => el,
+      installPage: () => true,
+      executionState: () => ({ conversationId: 'conv-ssh-66', status: 2 }),
+      runningConversationIds: () => ['conv-ssh-66'],
+      capabilities: () => ({}),
+      setEnabled(v) {
+        if (failSetEnabledCount > 0) { failSetEnabledCount--; throw new Error('Antigravity conversation service is unavailable'); }
+        applied.enabled = v;
+      },
+      setStageUpdates(v) { applied.stageUpdates = v; },
+      setEfficientIO(v) { applied.efficientIO = v; },
+      setContextLimit(v) { applied.contextLimit = v; },
+      setSidebarProjectLimit(v) { applied.sidebarProjectLimit = v; },
+      dispose() {}
+    },
+    __agyPowertoolsHost: raw => {
+      const msg = JSON.parse(raw);
+      if (msg.method === 'settings.get') {
+        settingsGetCount++;
+        ctx.__agyPowertoolsReceive(msg.id, { ...remoteSettings });
+      } else if (msg.method === 'state') {
+        ctx.__agyPowertoolsReceive(msg.id, {
+          conversationId: 'conv-ssh-66',
+          turns: [],
+          requests: [],
+          errors: [],
+          contextWindow: {},
+          telemetry: {},
+          progress: {},
+          settings: { ...remoteSettings }
+        });
+      } else {
+        ctx.__agyPowertoolsReceive(msg.id, {});
+      }
+    },
+    MutationObserver: class { observe() {} disconnect() {} },
+    setInterval: (fn, ms) => { const item = { fn, ms, cleared: false }; intervals.push(item); return intervals.length; },
+    clearInterval: id => { if (intervals[id - 1]) intervals[id - 1].cleared = true; },
+    setTimeout: () => 1,
+    clearTimeout() {}
+  });
+
+  vm.runInContext(source, ctx);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  // Initial sync applyOptions and startup refresh attempts all threw -> settingsLoaded must remain false so next poll retries.
+  assert.ok(settingsGetCount >= 1);
+  assert.equal(applied.stageUpdates, null);
+
+  const beforeRetryCount = settingsGetCount;
+  const mainPoll = intervals.find(i => i.ms === 2000 && !i.cleared);
+  assert.ok(mainPoll);
+  mainPoll.fn();
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  assert.equal(settingsGetCount, beforeRetryCount + 1);
+  assert.equal(applied.enabled, true);
+  assert.equal(applied.stageUpdates, true);
+  assert.equal(applied.efficientIO, false);
+  assert.equal(applied.contextLimit, 500000);
+  assert.equal(applied.sidebarProjectLimit, 5);
+
+  // Simulate another window updating settings; state poll returns updated settings and must re-apply adapter options.
+  remoteSettings = { enabled: true, stageUpdates: false, efficientIO: true, contextLimit: 1000000, sidebarProjectLimit: 3 };
+  mainPoll.fn();
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  assert.equal(applied.stageUpdates, false);
+  assert.equal(applied.efficientIO, true);
+  assert.equal(applied.contextLimit, 1000000);
+  assert.equal(applied.sidebarProjectLimit, 3);
+
+  ctx.__agyPowertools.dispose();
+});

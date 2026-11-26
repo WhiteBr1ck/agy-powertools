@@ -853,3 +853,80 @@ test('inline edit capture-phase Enter and Send click revert and resend directly 
     ['sendMessage', 'conv-initial-58', 'second click edit', 'edit']
   ]);
 });
+
+test('runtime option setters survive early boot before conversation service mounts and hook send once available (Issue #66)', async () => {
+  let mountedElement = null;
+  const sentPayloads = [];
+  const service = {
+    forkConversation() {},
+    async sendUserCascadeMessage(payload) { sentPayloads.push(payload); return payload; }
+  };
+  const serviceElement = {
+    '__reactFiber$boot': { tag: 10, type: {}, memoizedProps: { value: service }, return: null }
+  };
+  const baseConfig = { plannerConfig: { noToolExplanation: true }, checkpointConfig: { enabled: true } };
+  const resolve = () => baseConfig;
+  const modelText = { type: 'step', step: { step: { case: 'plannerResponse', value: { response: 'Checking files.' } } } };
+  const render = arg => ({ leadingSteps: arg.leadingSteps || [], tailSteps: [], body: { type: 'collapsible', isActive: arg.running, content: { groups: arg.groups } } });
+  const nativeFlat = args => {
+    const out = [];
+    for (const g of args.groups) {
+      out.push({ type: 'header', id: `header-${g.id}`, label: g.label });
+      for (const it of g.items) out.push({ type: 'row', id: it.cascadeId, cascadeId: it.cascadeId, isIndented: true, groupId: g.id });
+    }
+    return out;
+  };
+  const context = vm.createContext({
+    document: { querySelector: () => mountedElement },
+    __agyNativeBindings: { names: { resolve: 'sjc', segment: 'Yyc', menu: 'lHc', sidebarItems: 'VWc' } },
+    sjc: resolve,
+    Yyc: render,
+    VWc: nativeFlat,
+    I: { CascadeConfigSchema: {}, CheckpointConfigSchema: {}, CascadePlannerConfigSchema: {}, PromptSectionCustomizationConfigSchema: {}, PromptSectionSchema: {} },
+    tc: (_, value) => structuredClone(value),
+    Wb: (_, value) => value
+  });
+  vm.runInContext(readFileSync(new URL('../lib/native-client.js', import.meta.url), 'utf8'), context);
+  const adapter = context.__agyNativeAdapter;
+
+  // Simulate early SSH window boot: conversation service provider is not mounted yet.
+  adapter.setEnabled(true);
+  adapter.setStageUpdates(true);
+  adapter.setEfficientIO(true);
+  adapter.setContextLimit(500000);
+  adapter.setSidebarProjectLimit(2);
+
+  assert.equal(adapter.stageUpdates, true);
+  const resolved = context.sjc({});
+  assert.equal(resolved.plannerConfig.noToolExplanation, false);
+  assert.equal(resolved.checkpointConfig.maxTokenLimit, 500000);
+  assert.deepEqual(
+    Array.from(resolved.plannerConfig.promptSectionCustomizationConfig.appendPromptSections, p => p.title),
+    ['powertools_stage_updates', 'powertools_efficient_io']
+  );
+  const folded = context.Yyc({ groups: [], leadingSteps: [modelText], running: false });
+  assert.equal(folded.leadingSteps.length, 0);
+  assert.equal(folded.body.content.groups.length, 1);
+
+  const sidebarItems = context.VWc({
+    groups: [{ id: 'p1', label: 'Proj', items: [{ cascadeId: 'c1' }, { cascadeId: 'c2' }, { cascadeId: 'c3' }] }],
+    groupBy: 'project',
+    onlyShowFirstFewConvos: {}
+  });
+  assert.equal(sidebarItems.filter(x => x.type === 'row').length, 2);
+  assert.equal(sidebarItems.at(-1).label, 'See all (3)');
+
+  // Once the conversation service mounts, ensureRequestHook attaches sendUserCascadeMessage with the already-saved options.
+  mountedElement = serviceElement;
+  adapter.ensureRequestHook();
+  await service.sendUserCascadeMessage({ cascadeId: 'conv-ssh', cascadeConfig: {} });
+  assert.equal(sentPayloads.length, 1);
+  assert.equal(sentPayloads[0].cascadeConfig.plannerConfig.noToolExplanation, false);
+  assert.equal(sentPayloads[0].cascadeConfig.checkpointConfig.maxTokenLimit, 500000);
+  assert.deepEqual(
+    Array.from(sentPayloads[0].cascadeConfig.plannerConfig.promptSectionCustomizationConfig.appendPromptSections, p => p.title),
+    ['powertools_stage_updates', 'powertools_efficient_io']
+  );
+
+  adapter.dispose();
+});
