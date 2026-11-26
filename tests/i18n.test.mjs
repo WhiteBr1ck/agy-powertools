@@ -24,8 +24,30 @@ test('native settings translations preserve product names and English input term
  assert.equal(t('12 files changed','zh-CN'),'12 个文件已更改');assert.equal(t('1 file changed','zh-CN'),'1 个文件已更改');
  assert.equal(t('5h limit','zh-CN'),'5 小时限额');assert.equal(t('55% left','zh-CN'),'剩余 55%');assert.equal(t('100% left','zh-CN'),'剩余 100%');
  assert.equal(t('Resets in 5d 1h','zh-CN'),'5 天 1 小时后重置');assert.equal(t('Resets in 3h 33m','zh-CN'),'3 小时 33 分钟后重置');
- assert.equal(t('Pull Requests','zh-CN'),'Pull Requests');assert.equal(t('14m ago','zh-CN'),'14m ago');
+ assert.equal(t('14m ago','zh-CN'),'14m ago');
  assert.equal(t('Turbo','zh-CN'),'Turbo');assert.equal(t('当前会话','en'),'Current conversation');
+});
+
+test('sidebar display menu labels translate in Simplified and Traditional Chinese (Issue #79)', () => {
+  const document = { nodeType: 9, createTreeWalker: () => ({ nextNode: () => null }), querySelectorAll: () => [] };
+  const context = vm.createContext({ document, NodeFilter: { SHOW_TEXT: 4 }, MutationObserver: class { observe() {} disconnect() {} }, __agyToZhTw: toZhTw });
+  vm.runInContext(readFileSync('lib/native-i18n.js', 'utf8'), context);
+  const t = context.__agyI18n.t;
+  for (const [english, simplified, traditional] of [
+    ['Project', '项目', '專案'],
+    ['Sort Conversations', '会话排序', '會話排序'],
+    ['Sort Projects', '项目排序', '專案排序'],
+    ['Auto Pin', '自动置顶', '自動置頂'],
+    ['Archived Only', '仅显示已归档', '僅顯示已歸檔'],
+    ['Subtitles', '副标题', '副標題'],
+    ['Decorations', '状态标记', '狀態標記'],
+    ['Pull Requests', '拉取请求', '拉取請求']
+  ]) {
+    assert.equal(t(english, 'zh-CN'), simplified, english);
+    assert.equal(t(english, 'zh-TW'), traditional, english);
+    assert.equal(t(english, 'en'), english);
+  }
+  assert.equal(t('项目', 'en'), 'Projects');
 });
 
 test('Traditional Chinese (zh-TW) uses Taiwan IT terminology, converts UI strings cleanly, and persists in settings',()=>{
