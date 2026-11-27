@@ -69,6 +69,7 @@ test('Traditional Chinese (zh-TW) uses Taiwan IT terminology, converts UI string
   assert.equal(toZhTw('按实际规划 / 执行模型计价'), '按實際規劃 / 執行模型計價');
   assert.equal(formatRelativeTime(0, 30000, 'zh-TW'), '剛剛');
   assert.equal(formatRelativeTime(0, 120000, 'zh-TW'), '2 分鐘前');
+  assert.match(formatResetCountdown(7200000, 0, 'pt-BR'), /^Redefine em 2\s*h$/u);
   assert.equal(formatResetCountdown(7200000, 0, 'zh-TW'), '2 小時後重置');
   const html=renderAuxPaneHtml({version:'2.13.1',language:'zh-TW'});
   assert.match(html,/<html lang="zh-TW">/);
@@ -361,8 +362,8 @@ test('every pack covers the native catalog, static UI calls, and sidebar menus',
   const basePatternRegexes = getLocalePack(packLanguages[0]).patterns.map(([pattern]) => pattern);
   const mismatchToastEn = 'Account switch failed: logged in as another account. Please re-login the target account.';
   const mismatchToastZh = '切号未生效：当前登录的仍是其他账号，已标记目标凭据失效，请重新登录目标账号。';
-  const WORKED_RE = /^(?:Worked for\b|用时(?:\s|$)|用時(?:\s|$)|Durée\s*:|作業時間(?:\s|$)|작업 시간(?:\s|$)|Bearbeitungszeit(?:\s|$)|Tiempo de trabajo(?:\s|$)|Время работы(?:\s|$)|Đã xử lý(?:\s|$))/;
-  const UPDATES_RE = /(?:[\u00b7\u2022\-]\s*)?(\d+)\s+(?:updates?\b|条进度|條進度|étapes?\b|件の更新|개 업데이트|Aktualisierung(?:en)?\b|actualizaci[oó]n(?:es)?\b|обновлени\S*|cập nhật\b)/i;
+  const WORKED_RE = /^(?:Worked for\b|用时(?:\s|$)|用時(?:\s|$)|Durée\s*:|作業時間(?:\s|$)|작업 시간(?:\s|$)|Bearbeitungszeit(?:\s|$)|Trabalhou por(?:\s|$)|Tiempo de trabajo(?:\s|$)|Время работы(?:\s|$)|Đã xử lý(?:\s|$))/;
+  const UPDATES_RE = /(?:[\u00b7\u2022\-]\s*)?(\d+)\s+(?:updates?\b|条进度|條進度|étapes?\b|件の更新|개 업데이트|Aktualisierung(?:en)?\b|atualiza\u00e7(?:\u00e3o|\u00f5es)|actualizaci[oó]n(?:es)?\b|обновлени\S*|cập nhật\b)/i;
   for (const lang of packLanguages) {
     const pack = getLocalePack(lang);
     for (const key of nativeKeys) if (key && !/[\u3400-\u9fff]/u.test(key)) assert.ok(Object.hasOwn(pack.entries, key) && pack.entries[key]?.trim(), `${lang} entries parity: ${key}`);
@@ -444,7 +445,7 @@ test('switching all languages restores text and leaves project names and code un
   assert.equal(nodes[1].nodeValue,'Sort Projects');
 });
 
-test('sidebar menu-only labels translate only inside menu contexts across all 10 languages', () => {
+test('sidebar menu-only labels translate only inside menu contexts across the tested languages', () => {
   const matchesSelector = (sel, area) => Boolean(area) && sel.split(',').includes(area);
   const makeNode = (text, area) => {
     const state = { area };
@@ -482,7 +483,7 @@ test('sidebar menu-only labels translate only inside menu contexts across all 10
     return lang === 'zh-TW' ? toZhTw(expectedZhCn[label]) : expectedZhCn[label];
   };
 
-  assert.deepEqual(SUPPORTED_LANGUAGES, ['zh-CN', 'zh-TW', 'en', 'fr', 'ja', 'ko', 'de', 'es', 'ru', 'vi']);
+  assert.deepEqual(SUPPORTED_LANGUAGES, ['zh-CN', 'zh-TW', 'en', 'fr', 'ja', 'ko', 'de', 'es', 'ru', 'pt-BR', 'vi']);
 
   const menuNodes = menuLabels.map(label => makeNode(label, '[role="menu"]'));
   const altMenuNodes = ['[role="menuitem"]', '[role="menuitemradio"]', '[role="listbox"]', 'label'].map(area => makeNode('Sort Projects', area));
@@ -600,7 +601,7 @@ test('disabled integration serves the selected pack and scoped overrides through
   } finally {await stop?.();globalThis.fetch=fetchBefore;rmSync(dataDir,{recursive:true,force:true});}
 });
 
-test('PR #83 selective absorption protects conversation titles, scopes risky single-word controls, and syncs structured patterns across all 10 languages', () => {
+test('PR #83 selective absorption protects conversation titles, scopes risky single-word controls, and syncs structured patterns across the tested languages', () => {
   const source = readFileSync('lib/native-i18n.js', 'utf8');
   // Do NOT include PR #84 premature overlay selectors
   assert.equal(source.includes('data-agy-translate-root'), false);
@@ -715,10 +716,10 @@ test('PR #83 selective absorption protects conversation titles, scopes risky sin
     ctx.__agyLocalePack = getLocalePack(lang);
     ctx.__agyLocalization.apply(lang, false);
 
-    // Preserved tokens stay untouched across all 9 languages
+    // Preserved tokens stay untouched across the tested languages
     for (const token of preserves) assert.equal(t(token, lang), token, `${lang}: preserve ${token}`);
 
-    // Structured dynamic patterns translate cleanly across all 9 languages with no forbidden dots or placeholders
+    // Structured dynamic patterns translate cleanly across the tested languages with no forbidden dots or placeholders
     for (const sample of structuredSamples) {
       const rendered = t(sample, lang);
       assert.doesNotMatch(rendered, /\$\d/, `${lang}: raw placeholder in ${rendered}`);
