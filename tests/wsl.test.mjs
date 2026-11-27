@@ -230,11 +230,12 @@ test('accounts store surfaces vault error details on prepareAdd and degrades gra
     const failingVault = {
       supported: true,
       probe: () => ({ supported: true, reason: '' }),
+      inspectActive: () => ({ exists: true, email: 'alpha@example.com', hash: 'H-A' }),
       saveActiveTo: () => ({ ok: false, error: '未检测到 WSL2 登录凭据文件' }),
       hasSaved: () => false
     };
     const storeFail = createAccountsStore(dir, { vault: failingVault });
-    storeFail.syncActive({ email: 'alpha@example.com', name: 'Alpha' });
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ activeId: 'a', accounts: [{ id: 'a', email: 'alpha@example.com' }] }));
     assert.throws(() => storeFail.prepareAdd(), /未检测到 WSL2 登录凭据文件/);
 
     // 2. switchAccount succeeds with manualRestartRequired when relaunch throws after credential restore
@@ -246,7 +247,8 @@ test('accounts store surfaces vault error details on prepareAdd and degrades gra
       saveActiveTo(id) { slots.set(id, activeToken); return { ok: true, hash: `H-${activeToken}` }; },
       restoreToActive(id) { activeToken = slots.get(id); return { ok: true, hash: `H-${activeToken}` }; },
       hasSaved: id => slots.has(id),
-      inspectSaved: id => ({ exists: slots.has(id), hash: slots.has(id) ? `H-${slots.get(id)}` : '' }),
+      inspectActive: () => ({ exists: true, email: activeToken === 'tok-A' ? 'alpha@example.com' : 'beta@example.com', hash: `H-${activeToken}` }),
+      inspectSaved: id => ({ exists: slots.has(id), email: slots.get(id) === 'tok-A' ? 'alpha@example.com' : 'beta@example.com', hash: slots.has(id) ? `H-${slots.get(id)}` : '' }),
       removeSaved: id => { slots.delete(id); return { ok: true }; }
     };
     const store = createAccountsStore(join(dir, 'ok'), {

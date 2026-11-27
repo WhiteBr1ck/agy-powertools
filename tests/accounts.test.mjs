@@ -25,7 +25,9 @@ function createFakeVault(initial = {}) {
     slots,
     has(target) { return slots.has(target); },
     inspect(target) {
-      return slots.has(target) ? { exists: true, hash: hashOf(slots.get(target)) } : { exists: false, hash: '' };
+      const value = slots.get(target);
+      const owner = ({ 'token-A': 'alpha', 'token-B': 'beta', 'tok-a': 'alpha', 'tok-b': 'beta', 'tok-alpha': 'alpha', 'tok-beta': 'beta' })[value];
+      return slots.has(target) ? { exists: true, hash: hashOf(value), email: owner ? `${owner}@example.com` : '' } : { exists: false, hash: '' };
     },
     copy(from, to) {
       if (!slots.has(from)) return { ok: false, error: 'missing source' };

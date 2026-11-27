@@ -1028,17 +1028,20 @@ test('Windows relaunch uses AV-clean static explorer-cmd / node-worker architect
     const winExe = join(root, 'AppData', 'Local', 'Programs', 'antigravity', 'Antigravity.exe');
     mkdirSync(join(root, 'AppData', 'Local', 'Programs', 'antigravity'), { recursive: true });
     writeFileSync(winExe, '');
-    const appStoragePath = join(root, 'AppData', 'Roaming', 'Antigravity', 'app_storage.json');
-    mkdirSync(join(root, 'AppData', 'Roaming', 'Antigravity'), { recursive: true });
+    const profile = join(root, 'custom profile');
+    const appStoragePath = join(profile, 'app_storage.json');
+    mkdirSync(profile);
     writeFileSync(appStoragePath, JSON.stringify({ 'agy.onboarding.lastLoginUsername': 'old@example.com', 'agy.onboarding.lastLoginIsGcpTos': 'false' }));
 
     // 1. Standard plugin_data dir -> explorer.exe launches static shipped scripts/relaunch-antigravity.cmd (Job Object escape, zero PowerShell/.lnk)
     const stdSpawned = [];
+    const credentialSwitch = { accountId:'acct-test', expectedEmail:'bob@example.com', expectedHash:'AABBCCDDEEFF', switchId:'11111111-2222-3333-4444-555555555555' };
     const stdRes = scheduleRelaunchWithDebugPort({
       dataDir: stdDataDir,
       home: root,
       platform: 'win32',
-      env: { LOCALAPPDATA: join(root, 'AppData', 'Local') },
+      env: { LOCALAPPDATA: join(root, 'AppData', 'Local'), ANTIGRAVITY_USER_DATA_DIR: profile },
+      credentialSwitch,
       onboardingSync: { email: 'bob@example.com', isGcpTos: true },
       appStoragePath,
       spawnProcess(cmd, args, opts) { stdSpawned.push({ cmd, args, opts }); return { unref() {} }; }
@@ -1055,6 +1058,8 @@ test('Windows relaunch uses AV-clean static explorer-cmd / node-worker architect
     assert.equal(existsSync(join(stdDataDir, 'relaunch-antigravity.ack')), false);
 
     const stdJob = JSON.parse(readFileSync(stdRes.jobPath, 'utf8'));
+    assert.deepEqual(stdJob.credentialSwitch, credentialSwitch);
+    assert.equal(stdJob.profileDir, realpathSync.native(profile));
     assert.equal(stdJob.format, 1);
     assert.equal(stdJob.nonce, stdRes.nonce);
     assert.equal(stdJob.target, winExe);
@@ -1070,7 +1075,7 @@ test('Windows relaunch uses AV-clean static explorer-cmd / node-worker architect
     assert.deepEqual(stdJob.onboardingSync, {
       email: 'bob@example.com',
       isGcpTos: true,
-      appStoragePath
+      appStoragePath: join(stdJob.profileDir, 'app_storage.json')
     });
 
     // 2. Custom dataDir -> spawns static scripts/relaunch-worker.mjs directly via node-worker (still zero PowerShell/.lnk)
@@ -1081,10 +1086,12 @@ test('Windows relaunch uses AV-clean static explorer-cmd / node-worker architect
       dataDir: customDataDir,
       home: root,
       platform: 'win32',
-      env: { LOCALAPPDATA: join(root, 'AppData', 'Local') },
+      env: { LOCALAPPDATA: join(root, 'AppData', 'Local'), ANTIGRAVITY_USER_DATA_DIR: profile },
+      credentialSwitch,
       spawnProcess(cmd, args, opts) { customSpawned.push({ cmd, args, opts }); return { unref() {} }; }
     });
     assert.equal(customRes.launchMethod, 'node-worker');
+    assert.deepEqual(JSON.parse(readFileSync(customRes.jobPath, 'utf8')).credentialSwitch, credentialSwitch);
     assert.equal(customSpawned[0].cmd, process.execPath);
     assert.ok(customSpawned[0].args[0].endsWith('relaunch-worker.mjs'));
     assert.equal(customSpawned[0].args[1], customRes.jobPath);

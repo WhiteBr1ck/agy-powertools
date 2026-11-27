@@ -706,7 +706,9 @@ test('startAddAccount awaits active sync and calls accounts.completeAdd, and ref
       } else if (req.method === 'accounts.prepareAdd') {
         p.context.__agyPowertoolsReceive(req.id, { ok: true, backedUpId: 'acct-a', prevCredHash: 'HASH_A', activeId: 'acct-a', accounts: [{ id: 'acct-a', email: 'alpha@example.com', hasCredential: true }] });
       } else if (req.method === 'accounts.syncActive') {
-        if (mismatchNextSync) {
+        if (mismatchNextSync === 'pending') {
+          p.context.__agyPowertoolsReceive(req.id, { syncSkipped: true });
+        } else if (mismatchNextSync) {
           p.context.__agyPowertoolsReceive(req.id, {
             activeId: 'acct-b',
             accounts: [{ id: 'acct-b', email: 'beta@example.com', hasCredential: true }],
@@ -769,6 +771,9 @@ test('startAddAccount awaits active sync and calls accounts.completeAdd, and ref
   await capturedEnv.refreshAccountQuotas('acct-b');
   const afterObserve = calls.filter(c => c.method === 'quota.observe').length;
   assert.equal(afterObserve, beforeObserve);
+  mismatchNextSync = 'pending';
+  await capturedEnv.refreshAccountQuotas('acct-b');
+  assert.equal(calls.filter(c => c.method === 'quota.observe').length, beforeObserve);
 
   p.context.__agyPowertools.dispose();
 });

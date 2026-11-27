@@ -169,14 +169,37 @@ test('credential vault extracts id_token_email and blocks mismatched writes acro
   assert.equal(winEnvs[1].AGY_CRED_EXPECTED_EMAIL, 'beta@example.com');
 });
 
+test('macOS go-keyring credentials are inspected without changing the stored representation', () => {
+  const raw = JSON.stringify({ id_token_email: 'Test@example.invalid' });
+  const wrap = text => 'go-keyring-base64:' + Buffer.from(text).toString('base64');
+  let secret = wrap(raw);
+  const writes = [];
+  const vault = createCredentialVault({ platform: 'darwin', runSpawn(cmd, args, opts) {
+    if (cmd === '/usr/bin/osascript') return { status: 1 };
+    if (args.includes('-w')) return { status: 0, stdout: Buffer.from(secret + '\n') };
+    writes.push(opts.input);
+    return { status: 0 };
+  } });
+  assert.equal(vault.inspectActive().email, 'test@example.invalid');
+  assert.equal(vault.inspectSaved('acct-test').email, 'test@example.invalid');
+  assert.equal(vault.saveActiveTo('acct-test', {expectedEmail:'test@example.invalid'}).ok, true);
+  assert.ok(writes[0].includes(Buffer.from(secret).toString('hex')));
+  assert.equal(extractCredentialEmail(wrap(JSON.stringify({token:Buffer.from(raw).toString('base64')}))), 'test@example.invalid');
+  for (secret of [wrap(raw) + '!', wrap('opaque'), wrap(JSON.stringify({})), wrap(wrap(wrap(wrap(wrap(raw)))))]) {
+    assert.equal(vault.inspectActive().email, undefined);
+    assert.equal(vault.restoreToActive('acct-test', {expectedEmail:'test@example.invalid'}).mismatch, true);
+  }
+  assert.equal(writes.length, 1);
+});
+
 test('Windows PowerShell WIN32_SCRIPT compiles Add-Type and extracts id_token_email across direct JSON, decoy keys, and WSL envelopes', { skip: process.platform !== 'win32' }, () => {
   let capturedScript = '';
   const probeVault = createCredentialVault({
     platform: 'linux',
     wsl: true,
-    runSpawn(cmd, args, opts) {
+    runSpawn(_cmd, args) {
       capturedScript = args[args.indexOf('-Command') + 1];
-      return spawnSync(cmd, args, { ...opts, timeout: 20000 });
+      return { status: 0, stdout: '{"ok":true}' };
     }
   });
   const probed = probeVault.probe({ force: true });
@@ -185,7 +208,10 @@ test('Windows PowerShell WIN32_SCRIPT compiles Add-Type and extracts id_token_em
 
   const endMatch = capturedScript.match(/^"@/m);
   assert.ok(endMatch && typeof endMatch.index === 'number');
-  const addTypeBlock = capturedScript.slice(0, endMatch.index + endMatch[0].length);
+  // Compile only the pure metadata methods; the test process has no CredMan imports or operations.
+  const addTypeBlock = capturedScript.slice(0, endMatch.index + endMatch[0].length)
+    .replace(/  \[StructLayout\([\s\S]*?(?=  public static string ShortHash)/, '');
+  assert.ok(!addTypeBlock.includes('DllImport'));
   const directPayload = JSON.stringify({
     token: { access_token: 'tok-a', refresh_token: 'rt-a' },
     id_token_email: 'Alpha@Example.com'
@@ -204,11 +230,12 @@ test('Windows PowerShell WIN32_SCRIPT compiles Add-Type and extracts id_token_em
     addTypeBlock,
     '$cases = @($env:AGY_TEST_C1, $env:AGY_TEST_C2, $env:AGY_TEST_C3, $env:AGY_TEST_C4)',
     '$out = foreach ($c in $cases) { [AgyWinCred]::ExtractEmail([System.Text.Encoding]::UTF8.GetBytes($c)) }',
-    'Write-Output ($out -join "|")'
+    'Write-Output ($out -join "|")',
+    'Write-Output ([AgyWinCred]::RefreshHash([System.Text.Encoding]::UTF8.GetBytes($cases[0])))'
   ].join('\n');
   const res = spawnSync(
     'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-Command', verifyScript],
+    ['-NoProfile', '-NonInteractive', '-Command', verifyScript],
     {
       encoding: 'utf8',
       windowsHide: true,
@@ -223,8 +250,9 @@ test('Windows PowerShell WIN32_SCRIPT compiles Add-Type and extracts id_token_em
     }
   );
   assert.equal(res.status, 0, res.stderr || res.error?.message || 'powershell failed');
-  const line = String(res.stdout || '').trim().split(/\r?\n/).filter(Boolean).at(-1) || '';
-  assert.equal(line, 'alpha@example.com|real@example.com|beta@example.com|');
+  const lines = String(res.stdout || '').trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(lines.at(-2), 'alpha@example.com|real@example.com|beta@example.com|');
+  assert.match(lines.at(-1), /^[0-9A-F]{12}$/);
 });
 
 test('macOS credential vault keeps secrets out of argv across small, medium (2.6KB), and >4KB OAuth payloads and round-trips cleanly (Issue #75)', () => {

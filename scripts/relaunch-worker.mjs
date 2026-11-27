@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync
 } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve, win32 } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -166,6 +166,20 @@ export function validateRelaunchJob(
       return { valid: false, reason: 'invalid-onboarding-storage' };
     }
   }
+  if (job.credentialSwitch !== undefined) {
+    const sw = job.credentialSwitch;
+    if (!sw || typeof sw !== 'object' || Object.keys(sw).length !== 4 ||
+        typeof sw.accountId !== 'string' || !/^[\w-]{1,64}$/.test(sw.accountId) ||
+        typeof sw.expectedEmail !== 'string' || !SAFE_EMAIL_RE.test(sw.expectedEmail) ||
+        typeof sw.expectedHash !== 'string' || !/^[0-9a-f]{12}$/i.test(sw.expectedHash) ||
+        typeof sw.switchId !== 'string' || !/^[0-9a-f-]{36}$/i.test(sw.switchId)) {
+      return { valid: false, reason: 'invalid-credential-switch' };
+    }
+    if (typeof job.profileDir !== 'string' || !isAbsolute(job.profileDir) ||
+        (job.onboardingSync && job.onboardingSync.appStoragePath !== join(job.profileDir, 'app_storage.json'))) {
+      return { valid: false, reason: 'invalid-switch-profile' };
+    }
+  }
   return { valid: true };
 }
 
@@ -188,10 +202,11 @@ export function buildCleanTargetEnv(baseEnv, job) {
   const env = { ...(baseEnv || {}) };
   for (const key of Object.keys(env)) {
     const upper = key.toUpperCase();
-    if (SCRUB_ENV_EXACT.has(upper) || upper.startsWith('ANTIGRAVITY_SIDECAR_')) {
+    if (SCRUB_ENV_EXACT.has(upper) || upper.startsWith('ANTIGRAVITY_SIDECAR_') || (job?.credentialSwitch && upper === 'ANTIGRAVITY_USER_DATA_DIR')) {
       delete env[key];
     }
   }
+  if (job?.credentialSwitch) env.ANTIGRAVITY_USER_DATA_DIR = job.profileDir;
   if (job?.proxyEnabled) {
     if (job.proxyEnv && typeof job.proxyEnv === 'object') {
       for (const [key, value] of Object.entries(job.proxyEnv)) {
@@ -230,6 +245,25 @@ function defaultListAntigravityPids(excludePids) {
   });
   if (res.error || res.status !== 0) return [];
   return parseTasklistPids(res.stdout, { excludePids });
+}
+
+// Use an unfiltered CSV listing: an error, localized diagnostic or truncated row
+// is not evidence that all writers exited. Observe LS/CLI; never kill them by name.
+export function parseCredentialWriterPids(stdout, selfPid) {
+  const lines = String(stdout || '').trim().split(/\r?\n/);
+  const pids = [];
+  for (const line of lines) {
+    const match = /^"([^"]+)","(\d+)","[^"]*","\d+","[^"]*"$/.exec(line.trim());
+    if (!match) throw new Error('process-list-unavailable');
+    if (/^(?:antigravity|language_server(?:_windows(?:_[\w-]+)?)?|agy)\.exe$/i.test(match[1]) && +match[2] !== selfPid) pids.push(+match[2]);
+  }
+  return pids;
+}
+
+function defaultListWriterPids() {
+  const res = spawnSync('tasklist.exe', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 8000 });
+  if (res.error || res.status !== 0) throw new Error('process-list-unavailable');
+  return parseCredentialWriterPids(res.stdout, process.pid);
 }
 
 function defaultGracefulClosePids(pids) {
@@ -304,6 +338,32 @@ export async function runRelaunchJob(jobPath, deps = {}) {
     } catch {}
   };
 
+  const sw = job.credentialSwitch;
+  const stillRequested = () => {
+    const state = JSON.parse(readFileSync(join(dirname(jobPath), 'accounts.json'), 'utf8'));
+    const target = state.accounts.find(a => a.id === sw.accountId);
+    return state.pendingSwitch?.switchId === sw.switchId && state.pendingSwitch.targetId === sw.accountId &&
+      state.pendingSwitch.profileDir === job.profileDir &&
+      target?.email === sw.expectedEmail && target.credHash === sw.expectedHash && !target.disabled && !target.quarantined;
+  };
+  const fail = reason => {
+    appendLog(reason);
+    try { atomicWriteJson(job.ackPath, { nonce: job.nonce, pid: process.pid, state: 'failed', failedSwitchId: sw?.switchId, reason, at: Date.now() }); } catch {}
+    try { if (JSON.parse(readFileSync(jobPath, 'utf8')).nonce === job.nonce) unlinkSync(jobPath); } catch {}
+    return { ok: false, reason };
+  };
+
+  // Explorer may start us with a different environment than the app. Only use
+  // the canonical profile pinned by the initiating app and its pending intent.
+  let verifiedProfile;
+  if (sw) {
+    try {
+      const { verifiedSwitchProfileDir } = await import('../lib/paths.mjs');
+      verifiedProfile = () => verifiedSwitchProfileDir(job.profileDir) === job.profileDir;
+      if (!verifiedProfile() || !stillRequested()) return fail('switch-cancelled');
+    } catch { return fail('invalid-switch-profile'); }
+  }
+
   // 1. Immediately write ACK JSON atomically so the caller confirms AV/EDR did not block launch
   try {
     atomicWriteJson(job.ackPath, {
@@ -314,11 +374,15 @@ export async function runRelaunchJob(jobPath, deps = {}) {
     });
   } catch (err) {
     appendLog(`ack write err: ${err?.message || err}`);
+    if (sw) return fail('ack-write-failed');
   }
   appendLog(`worker started pid=${process.pid} ppid=${process.ppid}`);
 
   // 2. Brief settle pause so caller reads ACK before Antigravity begins closing
   await sleep(settleMs);
+  if (sw) {
+    try { if (!stillRequested()) return fail('switch-cancelled'); } catch { return fail('switch-cancelled'); }
+  }
 
   // 3-4. Find running non-self Antigravity.exe PIDs and send graceful WM_CLOSE in a single taskkill.exe call (no /F)
   const initialPids = listTargetPids().filter(pid => !excludePids.has(pid));
@@ -351,6 +415,24 @@ export async function runRelaunchJob(jobPath, deps = {}) {
   }
 
   await sleep(postExitSettleMs);
+
+  if (sw) {
+    try {
+      // Resolve the backend first, then take the last process snapshot immediately before restore.
+      const vault = deps.vault || (await import('../lib/credential-vault.mjs')).createCredentialVault();
+      if (vault.backend !== 'win32-credman') return fail('unsupported-credential-backend');
+      const listWriters = deps.listWriterPids || defaultListWriterPids;
+      const deadline = Date.now() + (deps.writerTimeoutMs ?? 10000);
+      while (listWriters().length) {
+        if (Date.now() >= deadline) return fail('credential-writers-still-running');
+        await sleep(pollMs);
+      }
+      if (!stillRequested() || !verifiedProfile()) return fail('switch-cancelled');
+      if (!vault.restoreToActive(sw.accountId, { expectedEmail: sw.expectedEmail, expectedHash: sw.expectedHash })?.ok) return fail('credential-restore-failed');
+      try { unlinkSync(join(job.profileDir, 'credential-user-scope')); } catch (err) { if (err.code !== 'ENOENT') return fail('scope-reset-failed'); }
+      atomicWriteJson(job.ackPath, { nonce: job.nonce, pid: process.pid, state: 'restored', appliedSwitchId: sw.switchId, at: Date.now() });
+    } catch { return fail('credential-switch-failed'); }
+  }
 
   // 6. Post-exit atomic app_storage.json onboarding sync in pure Node.js
   if (job.onboardingSync?.appStoragePath && exists(job.onboardingSync.appStoragePath)) {
@@ -414,6 +496,7 @@ export async function runRelaunchJob(jobPath, deps = {}) {
       pid: process.pid,
       childPid: child?.pid || null,
       state: 'launched',
+      ...(sw ? { appliedSwitchId: sw.switchId } : {}),
       ok: verified,
       at: Date.now()
     });
