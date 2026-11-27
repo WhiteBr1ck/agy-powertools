@@ -4234,3 +4234,192 @@ test('About panel surfaces update.install error message when request rejects (Is
   assert.match(collectText(statusEl), /EACCES: permission denied/);
   panels.dispose();
 });
+
+test('QuickPopover keeps full 940px width when space remains on the left and tracks anchor space across resizes', () => {
+  const panelsCode = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
+  const styles = [];
+  const states = [];
+  const effects = [];
+  const resizeObservers = [];
+  const rootProps = new Map();
+  const winListeners = new Map();
+  let setPropCalls = 0;
+  let stateIdx = 0;
+  let quickEnabled = true;
+
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    Fragment: 'fragment',
+    useId: () => 'qp-tip-1',
+    useState: init => {
+      const i = stateIdx++;
+      if (!(i in states)) states[i] = typeof init === 'function' ? init() : init;
+      return [states[i], val => { states[i] = typeof val === 'function' ? val(states[i]) : val; }];
+    },
+    useEffect: (fn, deps) => { effects.push({ fn, deps }); },
+    useLayoutEffect: (fn, deps) => { effects.push({ fn, deps }); },
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+
+  let innerWidth = 1024;
+  let anchorRect = { left: 955, right: 983, top: 38, bottom: 66, width: 28, height: 28 };
+  let anchorConnected = true;
+  const anchorEl = {
+    get isConnected() { return anchorConnected; },
+    getBoundingClientRect: () => anchorRect,
+    closest: () => null,
+    parentElement: null
+  };
+
+  const ctx = vm.createContext({
+    React,
+    Intl,
+    URL,
+    ResizeObserver: class MockResizeObserver {
+      constructor(cb) {
+        this.cb = cb;
+        this.observed = [];
+        this.disconnected = false;
+        resizeObservers.push(this);
+      }
+      observe(el) { this.observed.push(el); }
+      disconnect() { this.disconnected = true; }
+      trigger() { this.cb([], this); }
+    },
+    get innerWidth() { return innerWidth; },
+    window: {
+      addEventListener: (type, fn) => {
+        if (!winListeners.has(type)) winListeners.set(type, new Set());
+        winListeners.get(type).add(fn);
+      },
+      removeEventListener: (type, fn) => {
+        winListeners.get(type)?.delete(fn);
+      }
+    },
+    document: {
+      createElement: tag => ({ tagName: tag, dataset: {}, textContent: '', remove() {} }),
+      head: { append: node => styles.push(node) },
+      body: { nodeName: 'BODY' },
+      documentElement: {
+        style: {
+          getPropertyValue: name => rootProps.get(name) || '',
+          setProperty: (name, value) => { setPropCalls++; rootProps.set(name, String(value)); },
+          removeProperty: name => { rootProps.delete(name); }
+        }
+      }
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    __agyDashboard: {
+      dateRange: () => ({ preset: 'weeklyQuota', start: 0, end: 1, activePools: [], status: 'unstarted' }),
+      summarizeRequests: () => ({ requests: [], success: 0, errors: 0, tokens: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0, cost: 0, priced: 0, points: [], models: [] }),
+      distributionModels: () => [],
+      subscriptionIdentity: () => ({ family: 'pro', style: 'pro', label: 'Pro' }),
+      annotateCacheAnomalies: () => new Map()
+    },
+    setInterval: () => 1,
+    clearInterval: () => {},
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    Uy: 'button',
+    Sy: 'tooltip',
+    dq: ({ name }) => ({ type: 'icon', props: { name }, children: [] }),
+    HC: ({ children, ...p }) => React.createElement('popover', p, ...(Array.isArray(children) ? children : [children])),
+    IC: ({ children, ...p }) => React.createElement('popover-trigger', p, ...(Array.isArray(children) ? children : [children])),
+    JC: ({ children, ...p }) => React.createElement('popover-content', p, ...(Array.isArray(children) ? children : [children])),
+    VP: 'section',
+    TP: 'card',
+    UP: 'row',
+    XP: 'switch'
+  });
+
+  vm.runInContext(panelsCode, ctx);
+  const panels = ctx.__agyPanels({
+    t: v => v,
+    options: () => ({ enabled: true, titlebarQuickPanel: quickEnabled, language: 'zh-CN' }),
+    dashboard: () => null,
+    loadDashboard: () => Promise.resolve(null),
+    loadProxyStatus: () => Promise.resolve(null),
+    subscribe: () => () => {},
+    revision: () => 0,
+    capabilities: () => ({ models: [] })
+  });
+
+  const css = styles[0].textContent;
+  assert.doesNotMatch(css, /\.pt-qp-pop\{[^}]*64vw/);
+  assert.match(css, /\.pt-qp-pop\{[^}]*width:min\(940px,var\(--pt-qp-max-w,calc\(100vw - 24px\)\)\)!important;max-width:calc\(100vw - 24px\)!important;/);
+
+  const renderAndRunEffects = () => {
+    stateIdx = 0;
+    effects.length = 0;
+    const tree = panels.QuickPopover();
+    if (tree?.props?.ref) tree.props.ref(anchorEl);
+    const cleanups = effects.map(e => e.fn()).filter(fn => typeof fn === 'function');
+    return { tree, cleanups };
+  };
+
+  // Closed by default: no width variable or resize listener active
+  let pass = renderAndRunEffects();
+  assert.equal(rootProps.has('--pt-qp-max-w'), false);
+  assert.equal(winListeners.get('resize')?.size || 0, 0);
+
+  // Opening at 1024px window keeps 971px available width so min(940px, 971px) stays at full 940px
+  pass.tree.children[0].props.onOpenChange(true);
+  assert.equal(rootProps.get('--pt-qp-max-w'), '971px');
+  for (const fn of pass.cleanups) fn();
+  pass = renderAndRunEffects();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '971px');
+  assert.equal(winListeners.get('resize')?.size, 1);
+
+  // Redundant trigger at same dimensions avoids duplicate setProperty writes
+  const callsBeforeSameSize = setPropCalls;
+  resizeObservers.at(-1).trigger();
+  assert.equal(setPropCalls, callsBeforeSameSize);
+
+  // Shrinking to 960px (half-screen) caps to 907px (rect.right - 12px left margin) rather than 64vw (614px)
+  innerWidth = 960;
+  anchorRect = { left: 891, right: 919, top: 38, bottom: 66, width: 28, height: 28 };
+  for (const fn of winListeners.get('resize')) fn();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '907px');
+
+  // Expanding back to wide 1728px updates available width to 1674px (so min(940px, 1674px) returns to 940px)
+  innerWidth = 1728;
+  anchorRect = { left: 1658, right: 1686, top: 38, bottom: 66, width: 28, height: 28 };
+  resizeObservers.at(-1).trigger();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '1674px');
+
+  // Left-half anchor edge case prefers larger right-side space instead of collapsing against left margin
+  innerWidth = 1000;
+  anchorRect = { left: 20, right: 48, top: 38, bottom: 66, width: 28, height: 28 };
+  resizeObservers.at(-1).trigger();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '968px');
+
+  // Disconnected or zero-size anchor skips overwriting
+  anchorRect = { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 };
+  resizeObservers.at(-1).trigger();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '968px');
+  anchorConnected = false;
+  anchorRect = { left: 955, right: 983, top: 38, bottom: 66, width: 28, height: 28 };
+  resizeObservers.at(-1).trigger();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '968px');
+
+  // Closing cleans up --pt-qp-max-w, listeners, and observers
+  anchorConnected = true;
+  pass.tree.children[0].props.onOpenChange(false);
+  for (const fn of pass.cleanups) fn();
+  pass = renderAndRunEffects();
+  assert.equal(rootProps.has('--pt-qp-max-w'), false);
+  assert.equal(winListeners.get('resize')?.size || 0, 0);
+  assert.equal(resizeObservers.every(ro => ro.disconnected), true);
+
+  // Disabling titlebarQuickPanel while open clears --pt-qp-max-w
+  pass.tree.children[0].props.onOpenChange(true);
+  for (const fn of pass.cleanups) fn();
+  pass = renderAndRunEffects();
+  assert.equal(rootProps.get('--pt-qp-max-w'), '971px');
+  quickEnabled = false;
+  for (const fn of pass.cleanups) fn();
+  pass = renderAndRunEffects();
+  assert.equal(rootProps.has('--pt-qp-max-w'), false);
+
+  panels.dispose();
+});
