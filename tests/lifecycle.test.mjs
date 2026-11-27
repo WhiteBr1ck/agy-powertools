@@ -225,7 +225,7 @@ test('package excludes docs/images screenshots, bootstrap copies all worker impo
 
 test('release includes locale modules, static Windows relaunch scripts, and omits localized repository guides', () => {
   const names = new Set(original.files.map(file=>file.path));
-  for (const lang of ['index','fr','ja','ko','de','es','ru']) assert.ok(names.has(`lib/locales/${lang}.mjs`));
+  for (const lang of ['index','fr','ja','ko','de','es','ru','vi']) assert.ok(names.has(`lib/locales/${lang}.mjs`));
   assert.ok(names.has('scripts/relaunch-worker.mjs'));
   assert.ok(names.has('scripts/relaunch-antigravity.cmd'));
   assert.ok(![...names].some(name=>/^docs\/README_/.test(name)));

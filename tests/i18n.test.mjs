@@ -355,8 +355,8 @@ test('every pack covers the native catalog, static UI calls, and sidebar menus',
   const basePatternRegexes = getLocalePack(packLanguages[0]).patterns.map(([pattern]) => pattern);
   const mismatchToastEn = 'Account switch failed: logged in as another account. Please re-login the target account.';
   const mismatchToastZh = '切号未生效：当前登录的仍是其他账号，已标记目标凭据失效，请重新登录目标账号。';
-  const WORKED_RE = /^(?:Worked for\b|用时(?:\s|$)|用時(?:\s|$)|Durée\s*:|作業時間(?:\s|$)|작업 시간(?:\s|$)|Bearbeitungszeit(?:\s|$)|Tiempo de trabajo(?:\s|$)|Время работы(?:\s|$))/;
-  const UPDATES_RE = /(?:[\u00b7\u2022\-]\s*)?(\d+)\s+(?:updates?\b|条进度|條進度|étapes?\b|件の更新|개 업데이트|Aktualisierung(?:en)?\b|actualizaci[oó]n(?:es)?\b|обновлени\S*)/i;
+  const WORKED_RE = /^(?:Worked for\b|用时(?:\s|$)|用時(?:\s|$)|Durée\s*:|作業時間(?:\s|$)|작업 시간(?:\s|$)|Bearbeitungszeit(?:\s|$)|Tiempo de trabajo(?:\s|$)|Время работы(?:\s|$)|Đã xử lý(?:\s|$))/;
+  const UPDATES_RE = /(?:[\u00b7\u2022\-]\s*)?(\d+)\s+(?:updates?\b|条进度|條進度|étapes?\b|件の更新|개 업데이트|Aktualisierung(?:en)?\b|actualizaci[oó]n(?:es)?\b|обновлени\S*|cập nhật\b)/i;
   for (const lang of packLanguages) {
     const pack = getLocalePack(lang);
     for (const key of nativeKeys) if (key && !/[\u3400-\u9fff]/u.test(key)) assert.ok(Object.hasOwn(pack.entries, key) && pack.entries[key]?.trim(), `${lang} entries parity: ${key}`);
@@ -449,7 +449,7 @@ test('sidebar menu-only labels translate only inside menu contexts across all 9 
     return lang === 'zh-TW' ? toZhTw(expectedZhCn[label]) : expectedZhCn[label];
   };
 
-  assert.deepEqual(SUPPORTED_LANGUAGES, ['zh-CN', 'zh-TW', 'en', 'fr', 'ja', 'ko', 'de', 'es', 'ru']);
+  assert.deepEqual(SUPPORTED_LANGUAGES, ['zh-CN', 'zh-TW', 'en', 'fr', 'ja', 'ko', 'de', 'es', 'ru', 'vi']);
 
   const menuNodes = menuLabels.map(label => makeNode(label, '[role="menu"]'));
   const altMenuNodes = ['[role="menuitem"]', '[role="menuitemradio"]', '[role="listbox"]', 'label'].map(area => makeNode('Sort Projects', area));
@@ -532,8 +532,8 @@ test('sidebar menu-only labels translate only inside menu contexts across all 9 
   }
 });
 
-test('locale data and the nine guides exclude forbidden separators', () => {
-  const files=['README.md','README_EN.md',...['ZH_TW','FR','JA','KO','DE','ES','RU'].map(x=>`docs/README_${x}.md`),...['index',...packLanguages].map(x=>`lib/locales/${x}.mjs`)];
+test('locale data and all localized guides exclude forbidden separators', () => {
+  const files=['README.md','README_EN.md',...['ZH_TW','FR','JA','KO','DE','ES','RU','VI'].map(x=>`docs/README_${x}.md`),...['index',...packLanguages].map(x=>`lib/locales/${x}.mjs`)];
   for (const file of files) assert.doesNotMatch(readFileSync(file,'utf8'),/[\u00b7\u2022\u2027\u30fb]/u,file);
 });
 

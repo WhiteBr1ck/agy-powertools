@@ -176,7 +176,7 @@ test('all nine locale tags and POSIX locale names persist across settings stores
   const dir = mkdtempSync(join(tmpdir(), 'agy-locales-'));
   try {
     const store = createSettingsStore(dir);
-    for (const [tag, language] of Object.entries({'zh-CN':'zh-CN','zh-TW':'zh-TW','en-GB':'en','fr-FR':'fr','ja-JP':'ja','ko-KR':'ko','de-DE':'de','es-ES':'es','ru-RU':'ru'})) {
+    for (const [tag, language] of Object.entries({'zh-CN':'zh-CN','zh-TW':'zh-TW','en-GB':'en','fr-FR':'fr','ja-JP':'ja','ko-KR':'ko','de-DE':'de','es-ES':'es','ru-RU':'ru','vi-VN':'vi'})) {
       assert.equal(detectSystemLanguage({locale:tag}), language);
       assert.equal(detectSystemLanguage({env:{LC_MESSAGES:tag.replace('-', '_')+'.UTF-8'}}), language);
       store.set({language});
