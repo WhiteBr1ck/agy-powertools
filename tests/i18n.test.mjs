@@ -274,6 +274,36 @@ test('custom-i18n.json loads additive user translations safely and slash command
   }
 });
 
+test('custom skill descriptions reach the renderer up to the per-entry limit (Issue #94)', t => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'agy-long-i18n-'));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  const source = 'Skill description. '.repeat(106).slice(0, 2000);
+  const translated = '技能说明'.repeat(500);
+  writeFileSync(join(dataDir, 'custom-i18n.json'), JSON.stringify({
+    'zh-CN': { [` ${source} `]: ` ${translated} `, [source + '!']: '超长原文', 'Short description': translated + '！' }
+  }));
+  assert.deepEqual(loadCustomI18n(dataDir), [[source, translated]]);
+
+  const nodes = [source, source + '!', 'Short description'].map(nodeValue => ({ nodeValue, parentElement: { closest: () => null } }));
+  const document = { nodeType: 9, createTreeWalker() { const iter = nodes.values(); return { nextNode: () => iter.next().value }; } };
+  vm.runInNewContext(swarmI18nSource({ language: 'zh-CN' }, { dataDir }), {
+    location: { href: 'plugin://swarm--swarm_board-test/' }, document, NodeFilter: { SHOW_TEXT: 4 }, MutationObserver: class { observe() {} }
+  });
+  assert.deepEqual(nodes.map(node => node.nodeValue), [translated, source + '!', 'Short description']);
+});
+
+test('custom dictionary still caps valid pairs and ignores oversized files', t => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'agy-i18n-limits-'));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  const path = join(dataDir, 'custom-i18n.json');
+  const pairs = Array.from({ length: 2001 }, (_, i) => [`Source ${i}`, `Translation ${i}`]);
+  const json = JSON.stringify(pairs).padEnd(512 * 1024);
+  writeFileSync(path, json);
+  assert.deepEqual(loadCustomI18n(dataDir), pairs.slice(0, 2000));
+  writeFileSync(path, json + ' ');
+  assert.deepEqual(loadCustomI18n(dataDir), []);
+});
+
 test('Settings translations and editable placeholders follow language changes and disposal', () => {
   const fields = ['INPUT', 'TEXTAREA'].map(tagName => {
     const attrs = new Map([['placeholder', 'Search shortcuts...']]);

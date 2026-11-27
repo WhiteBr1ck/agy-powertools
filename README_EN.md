@@ -178,6 +178,8 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | Sidebar running conversations group | Off | Pins a collapsible Running section at the top of the sidebar showing all active chats, projects, active subagents, and waiting-for-confirmation alerts; hides when idle |
 | Taskbar unread badge | On | Shows `(N)` unread count in the window and taskbar title when background chats finish |
 
+To translate skill or plugin descriptions, add them to `plugin_data/agy-powertools/custom-i18n.json`. The loader skips a pair if either the source or translation exceeds 2,000 UTF-16 code units after trimming. It loads the first 2,000 valid pairs for the selected language and ignores files larger than 512 KiB.
+
 ### Telemetry & progress
 
 | Setting | Default | Description |
