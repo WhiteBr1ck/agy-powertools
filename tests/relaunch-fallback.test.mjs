@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import net from 'node:net';
 import vm from 'node:vm';
+import { createSidecarDomSandbox } from './helpers/sidecar-dom.mjs';
 import { createAccountsStore } from '../lib/accounts.mjs';
 import { renderAuxPaneHtml, startSidecarWebUi } from '../lib/sidecar-ui.mjs';
 import { getLocalePack, SUPPORTED_LANGUAGES } from '../lib/locales/index.mjs';
@@ -145,80 +146,6 @@ test('accounts.switchAccount and completeAdd return manualRestartRequired when r
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-function createSidecarDomSandbox(html, { fetchImpl }) {
-  const scriptMatches = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-  assert.ok(scriptMatches.length >= 1, 'Expected inline script in sidecar HTML');
-  const scriptCode = scriptMatches[scriptMatches.length - 1][1];
-
-  const elements = new Map();
-  const makeEl = id => {
-    const el = {
-      id,
-      hidden: false,
-      disabled: false,
-      checked: false,
-      textContent: '',
-      href: '',
-      dataset: {},
-      listeners: new Map(),
-      addEventListener(type, fn) {
-        if (!this.listeners.has(type)) this.listeners.set(type, []);
-        this.listeners.get(type).push(fn);
-      },
-      async trigger(type) {
-        const list = this.listeners.get(type) || [];
-        for (const fn of list) await fn();
-      }
-    };
-    elements.set(id, el);
-    return el;
-  };
-  for (const id of [
-    'dot', 'title', 'desc', 'compat-box', 'primary-actions', 'relaunch-btn',
-    'copy-cmd-btn', 'copy-diag-btn', 'cmd-box', 'mac-auto-relaunch-row', 'mac-auto-relaunch-title',
-    'mac-auto-relaunch-desc', 'mac-auto-relaunch-toggle', 'feedback', 'update-box',
-    'check-update-btn', 'install-update-btn', 'download-link', 'update-feedback', 'update-notes'
-  ]) {
-    makeEl(id);
-  }
-  elements.get('cmd-box').hidden = true;
-  elements.get('copy-cmd-btn').hidden = true;
-  elements.get('feedback').hidden = true;
-
-  const timeouts = [];
-  const intervals = [];
-  const ctx = vm.createContext({
-    URLSearchParams,
-    location: { search: '?token=test-tok', reload() {} },
-    document: {
-      documentElement: { lang: 'zh-CN' },
-      getElementById: id => elements.get(id) || null
-    },
-    navigator: { clipboard: { writeText: async () => {} } },
-    fetch: fetchImpl,
-    setTimeout: (fn, ms) => {
-      const entry = { id: timeouts.length + 1, fn, ms, cleared: false };
-      timeouts.push(entry);
-      return entry.id;
-    },
-    clearTimeout: id => {
-      const entry = timeouts.find(t => t.id === id);
-      if (entry) entry.cleared = true;
-    },
-    setInterval: (fn, ms) => {
-      const entry = { id: intervals.length + 1, fn, ms, cleared: false };
-      intervals.push(entry);
-      return entry.id;
-    },
-    clearInterval: id => {
-      const entry = intervals.find(t => t.id === id);
-      if (entry) entry.cleared = true;
-    }
-  });
-  vm.runInContext(scriptCode, ctx);
-  return { elements, timeouts, intervals };
-}
 
 test('renderAuxPaneHtml includes relaunchBlocked copy across all 9 languages and preserves blocked/timeout feedback across healthy polls', async () => {
   for (const lang of SUPPORTED_LANGUAGES) {
