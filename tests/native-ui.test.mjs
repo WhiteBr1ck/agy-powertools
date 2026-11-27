@@ -5346,3 +5346,112 @@ test('QuickPopover keeps full 940px width when space remains on the left and tra
   panels.dispose();
   assert.equal(rootProps.has('--pt-qp-max-w'), false);
 });
+
+test('sessionTokens renders combined main + subagent cumulative tokens in composer and opens per-subagent usage breakdown', async () => {
+  const p = page(true);
+  p.context.location.pathname = '/c/conv-cum';
+  const stub = props => ({ type: 'stub', props: props || {}, children: props?.children || [] });
+  Object.assign(p.context, { HC: stub, IC: stub, JC: stub, Uy: stub, k0: stub, dq: stub, Sy: stub, setTimeout, clearTimeout });
+  let lastRingEl = null;
+  let openedSubId = '';
+  p.context.React = {
+    Fragment: Symbol.for('react.fragment'),
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useEffect: () => {},
+    useSyncExternalStore: () => 0
+  };
+  p.context.ReactDOM = {
+    createRoot() {
+      return {
+        render(el) { lastRingEl = el; },
+        unmount() {}
+      };
+    }
+  };
+  p.context.getComputedStyle = () => ({ display: 'flex' });
+  const parent = { insertBefore(child) { child.isConnected = true; } };
+  const card = { cid: 'conv-cum' };
+  const trigger = { cid: 'conv-cum', isConnected: true, parentElement: parent, nextSibling: null, closest: sel => sel === '.surface-composer-card' ? card : null };
+  p.document.querySelectorAll = sel => sel === '[data-testid="model-selector-trigger"]' ? [trigger] : [];
+  p.context.__agyNativeAdapter.wrap = el => el;
+  p.context.__agyNativeAdapter.composerCascadeId = el => el?.cid || '';
+  p.context.__agyNativeAdapter.subagents = () => [
+    { id: 'sub-alpha', title: 'Repo Explorer', typeName: 'research', status: 'done', stepCount: 4, lastModifiedAtMs: 100 }
+  ];
+  p.context.__agyNativeAdapter.openSubagent = id => { openedSubId = id; };
+  p.context.__agyNativeAdapter.installPage = () => true;
+  p.context.__agyPanels = () => ({ dispose() {} });
+
+  const mainState = {
+    conversationId: 'conv-cum',
+    modelName: 'Gemini 4 Carbon (High)',
+    costUsd: 0.12,
+    contextWindow: { usedTokens: 50000, maxTokens: 200000, usedPercent: 25, compactions: 0, categories: [] },
+    telemetry: { totalTokens: 120000, inputTokens: 20000, cacheReadTokens: 90000, outputTokens: 10000, cacheHitPercent: 81.8, latestTps: 60, tps: 58, turnCount: 2, stepCount: 6, requestCount: 3, errorCount: 0, toolCount: 2 },
+    turns: [],
+    requests: []
+  };
+  const subState = {
+    conversationId: 'sub-alpha',
+    modelName: 'Gemini 3.1 Flash',
+    shortModel: '3.1 Flash',
+    costUsd: 0.03,
+    contextWindow: { usedTokens: 15000, maxTokens: 200000, usedPercent: 7.5, compactions: 0, categories: [] },
+    telemetry: { totalTokens: 30000, inputTokens: 5000, cacheReadTokens: 22000, outputTokens: 3000, cacheHitPercent: 81.5, tps: 95, requestCount: 2, toolCount: 4 }
+  };
+
+  const stored = { enabled: true, contextRing: true, speedStats: true, sessionTokens: true, subagentTelemetry: true, language: 'zh-CN', tokenUnit: 'compact', currency: 'USD' };
+  p.context.__agyInitialSettings = { ...stored };
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    queueMicrotask(() => {
+      if (req.method === 'settings.get') p.context.__agyPowertoolsReceive(req.id, { ...stored });
+      else if (req.method === 'state') p.context.__agyPowertoolsReceive(req.id, JSON.parse(JSON.stringify(mainState)));
+      else if (req.method === 'subagents.stats') p.context.__agyPowertoolsReceive(req.id, { items: { 'sub-alpha': subState } });
+      else p.context.__agyPowertoolsReceive(req.id, { ok: true });
+    });
+  };
+  vm.runInContext(source, p.context);
+  await new Promise(r => setTimeout(r, 40));
+
+  const expand = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(expand);
+    if (typeof node.type === 'function') return expand(node.type({ ...(node.props || {}), children: node.children }));
+    return { ...node, children: Array.isArray(node.children) ? node.children.map(expand) : node.children };
+  };
+  const findAll = (node, pred, acc = []) => {
+    if (!node || typeof node !== 'object') return acc;
+    if (Array.isArray(node)) { for (const c of node) findAll(c, pred, acc); return acc; }
+    if (pred(node)) acc.push(node);
+    findAll(node.children, pred, acc);
+    return acc;
+  };
+  const collectText = node => {
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (!node || typeof node !== 'object') return '';
+    if (Array.isArray(node)) return node.map(collectText).join(' ');
+    return collectText(node.children);
+  };
+
+  assert.ok(lastRingEl);
+  const fullTree = expand(lastRingEl);
+  const cumBtn = findAll(fullTree, n => n.props?.['data-testid'] === 'agy-session-tokens-trigger')[0];
+  assert.ok(cumBtn, 'cumulative session tokens trigger should render right after speed trigger');
+  assert.match(collectText(cumBtn), /150(?:\.0)?k/i, 'trigger displays combined 120k main + 30k subagent = 150k');
+
+  const cumPopup = findAll(fullTree, n => n.props?.['data-testid'] === 'agy-session-tokens-popup')[0];
+  assert.ok(cumPopup);
+  const popupText = collectText(cumPopup);
+  assert.ok(popupText.includes('Repo Explorer'));
+  assert.match(popupText, /30(?:\.0)?k/i);
+  assert.ok(popupText.includes('$0.15'));
+
+  const subBtn = findAll(cumPopup, n => n.props?.['data-testid'] === 'agy-session-tokens-sub-sub-alpha')[0];
+  assert.ok(subBtn);
+  assert.equal(subBtn.props['data-pt-tip'], undefined);
+  subBtn.props.onClick();
+  assert.equal(openedSubId, 'sub-alpha');
+
+  p.context.__agyPowertools.dispose();
+});

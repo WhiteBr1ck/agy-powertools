@@ -99,6 +99,10 @@ test('settings persist, merge safely, and reject unknown options without changin
     assert.equal(store.get().turnMeta, false);
     store.set({ turnMeta: false }); assert.equal(store.get().turnMeta, false);
     store.set({ turnMeta: true }); assert.equal(store.get().turnMeta, true);
+    assert.equal(DEFAULT_SETTINGS.sessionTokens, false);
+    assert.equal(store.get().sessionTokens, false);
+    store.set({ sessionTokens: true }); assert.equal(store.get().sessionTokens, true);
+    store.set({ sessionTokens: false }); assert.equal(store.get().sessionTokens, false);
     assert.equal(store.get().multiAccount, false);
     assert.equal(store.get().accountSwitcher, true);
     assert.equal(store.get().accountViewMode, 'list');
