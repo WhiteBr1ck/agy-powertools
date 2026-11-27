@@ -226,7 +226,7 @@ function createSidecarDomSandbox(html, { fetchImpl, clock = Date }) {
   return { elements, timeouts, intervals };
 }
 
-test('renderAuxPaneHtml includes relaunchBlocked copy across all 9 languages and preserves blocked/timeout feedback across healthy polls', async () => {
+test('renderAuxPaneHtml includes relaunchBlocked copy across the tested languages and preserves blocked/timeout feedback across healthy polls', async () => {
   for (const lang of SUPPORTED_LANGUAGES) {
     const html = renderAuxPaneHtml({ version: '2.18.0', language: lang });
     assert.ok(html.includes('relaunchBlocked'), `${lang} HTML missing relaunchBlocked`);
