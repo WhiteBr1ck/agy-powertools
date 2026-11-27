@@ -5346,3 +5346,203 @@ test('QuickPopover keeps full 940px width when space remains on the left and tra
   panels.dispose();
   assert.equal(rootProps.has('--pt-qp-max-w'), false);
 });
+
+test('sessionDuration composer badge, per-subagent duration breakdown, and Overview subagent row badge sub-toggles render cleanly without middle dots', async () => {
+  const p = page(true);
+  p.context.location.pathname = '/c/conv-dur';
+  p.context.__agyToZhTw = toZhTw;
+  const renderedByKind = new Map();
+  let openedSubId = '';
+  p.context.React = {
+    Fragment: Symbol('Fragment'),
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity).filter(c => c !== null && c !== undefined && c !== false) }),
+    useState: init => [typeof init === 'function' ? init() : init, () => {}],
+    useEffect() {},
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  p.context.ReactDOM = {
+    createRoot(mount) {
+      return {
+        render(el) { renderedByKind.set(`${mount.dataset.agyPowertoolsRoot}:${renderedByKind.size}`, { kind: mount.dataset.agyPowertoolsRoot, el }); renderedByKind.set(mount.dataset.agyPowertoolsRoot, el); },
+        unmount() {}
+      };
+    }
+  };
+  p.context.getComputedStyle = () => ({ display: 'flex' });
+  p.context.HC = ({ children }) => ({ type: 'popover', props: {}, children });
+  p.context.IC = ({ children }) => ({ type: 'trigger', props: {}, children });
+  p.context.JC = props => ({ type: 'dialog', props, children: props.children || [] });
+  p.context.Uy = props => ({ type: 'button', props, children: props.children || [] });
+  p.context.k0 = props => ({ type: 'disclosure', props, children: [props.trigger, ...(props.children || [])] });
+  p.context.Sy = props => ({ type: 'tooltip', props, children: props.children || [] });
+  p.context.dq = props => ({ type: 'icon', props, children: [] });
+  p.context.__agyNativeAdapter.wrap = el => el;
+  p.context.__agyNativeAdapter.installPage = () => true;
+  p.context.__agyNativeAdapter.composerCascadeId = () => 'conv-dur';
+  p.context.__agyNativeAdapter.openSubagent = id => { openedSubId = id; return true; };
+  p.context.__agyNativeAdapter.subagents = cid => cid === 'conv-dur' ? [{
+    id: 'sub-worker-1',
+    parentId: 'conv-dur',
+    depth: 1,
+    typeName: 'browser',
+    role: 'UI Verifier',
+    title: 'UI Verifier',
+    status: 'done',
+    stepCount: 8,
+    createdAtMs: 1_700_000_010_000,
+    lastModifiedAtMs: 1_700_000_310_000
+  }] : [];
+  p.context.__agyPanels = () => ({ Page: () => null, Sidebar: () => null, dispose() {} });
+
+  const parent = { insertBefore(child) { child.isConnected = true; } };
+  const trigger = { isConnected: true, parentElement: parent, nextSibling: null, closest: sel => sel === '.surface-composer-card' ? {} : null };
+  const subNode = { isConnected: true, dataset: { cascadeId: 'sub-worker-1' }, textContent: 'UI Verifier', append(c) { c.isConnected = true; }, insertBefore(c) { c.isConnected = true; } };
+  p.document.querySelectorAll = sel => {
+    if (sel === '[data-testid="model-selector-trigger"]') return [trigger];
+    if (sel.includes('subagent-node')) return [subNode];
+    return [];
+  };
+
+  const stored = {
+    enabled: true,
+    contextRing: true,
+    speedStats: true,
+    sessionDuration: true,
+    subagentTelemetry: true,
+    subagentBadgeContext: true,
+    subagentBadgeDuration: true,
+    subagentBadgeTokens: false,
+    subagentBadgeModel: true,
+    language: 'zh-CN'
+  };
+  const mainState = {
+    conversationId: 'conv-dur',
+    modelName: 'Gemini 4 Carbon',
+    costUsd: 0.42,
+    contextWindow: { usedPercent: 32.1, usedTokens: 160000, maxTokens: 500000, categories: [] },
+    telemetry: {
+      turnCount: 3,
+      stepCount: 24,
+      totalTokens: 180000,
+      inputTokens: 30000,
+      cacheReadTokens: 140000,
+      outputTokens: 10000,
+      cacheHitPercent: 82.4,
+      requestCount: 6,
+      errorCount: 0,
+      toolCount: 8,
+      tps: 55.5,
+      latestTps: 58.2,
+      avgTtftMs: 1400,
+      modelTimeMs: 42000,
+      toolTimeMs: 28000,
+      workedDurationMs: 95000,
+      completedWorkedDurationMs: 95000,
+      sessionSpanMs: 620000,
+      startedAtMs: 1_700_000_000_000,
+      activeStartedAtMs: null
+    },
+    turns: [],
+    requests: [],
+    errors: [],
+    progress: { status: 'complete', elapsedMs: 35000 }
+  };
+
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    queueMicrotask(() => {
+      if (req.method === 'settings.get') p.context.__agyPowertoolsReceive(req.id, { ...stored });
+      else if (req.method === 'state') p.context.__agyPowertoolsReceive(req.id, JSON.parse(JSON.stringify(mainState)));
+      else if (req.method === 'subagents.stats') {
+        p.context.__agyPowertoolsReceive(req.id, {
+          items: {
+            'sub-worker-1': {
+              conversationId: 'sub-worker-1',
+              modelName: 'Gemini 3.8 Flash',
+              shortModel: '3.8 Flash',
+              costUsd: 0.05,
+              contextWindow: { usedPercent: 12.4, usedTokens: 62000, maxTokens: 500000, categories: [] },
+              telemetry: {
+                stepCount: 8,
+                requestCount: 3,
+                totalTokens: 45000,
+                inputTokens: 15000,
+                cacheReadTokens: 28000,
+                outputTokens: 2000,
+                cacheHitPercent: 65.1,
+                toolCount: 4,
+                modelTimeMs: 12000,
+                toolTimeMs: 18000,
+                workedDurationMs: 38000,
+                completedWorkedDurationMs: 15000,
+                sessionSpanMs: 300000
+              }
+            }
+          }
+        });
+      } else p.context.__agyPowertoolsReceive(req.id, { ok: true });
+    });
+  };
+  p.context.__agyInitialSettings = { ...stored };
+  vm.runInContext(source, p.context);
+  await new Promise(r => setTimeout(r, 25));
+
+  const evalNode = node => {
+    if (node == null || typeof node === 'boolean') return null;
+    if (Array.isArray(node)) return node.map(evalNode).filter(Boolean);
+    if (typeof node === 'object') {
+      if (typeof node.type === 'function') return evalNode(node.type({ ...(node.props || {}), children: node.children }));
+      return { ...node, children: (node.children || []).map(evalNode).flat().filter(Boolean) };
+    }
+    return node;
+  };
+  const findTestId = (node, id) => {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (const item of node) { const hit = findTestId(item, id); if (hit) return hit; }
+      return null;
+    }
+    if (node.props?.['data-testid'] === id) return node;
+    for (const c of node.children || []) {
+      const hit = findTestId(c, id);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const collectText = node => {
+    if (node == null || typeof node === 'boolean') return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(collectText).join(' ');
+    if (typeof node === 'object') return collectText(node.children);
+    return '';
+  };
+
+  const ringTree = evalNode(renderedByKind.get('ring'));
+  const durTrigger = findTestId(ringTree, 'agy-session-duration-trigger');
+  assert.ok(durTrigger, 'expected composer session duration trigger');
+  assert.match(collectText(durTrigger), /1m 35s/);
+
+  const durPopup = findTestId(ringTree, 'agy-session-duration-details');
+  assert.ok(durPopup, 'expected session duration breakdown popover');
+  const popupText = collectText(durPopup);
+  assert.match(popupText, /1分35秒/);
+  assert.match(popupText, /10分20秒/);
+  assert.doesNotMatch(popupText, /[\u00b7\u2022\u2027\u30fb]/);
+
+  const subRowBtn = findTestId(durPopup, 'agy-session-duration-sub-sub-worker-1');
+  assert.ok(subRowBtn, 'expected clickable subagent duration row');
+  assert.equal(subRowBtn.props['data-pt-tip'], undefined, 'subagent button itself must not carry data-pt-tip');
+  assert.match(collectText(subRowBtn), /38秒/);
+  assert.match(collectText(subRowBtn), /5m 0s/);
+  subRowBtn.props.onClick();
+  assert.equal(openedSubId, 'sub-worker-1');
+
+  const badgeTree = evalNode(renderedByKind.get('subagent-badge'));
+  const subBadge = findTestId(badgeTree, 'agy-subagent-badge');
+  assert.ok(subBadge, 'expected Overview subagent badge');
+  assert.ok(findTestId(subBadge, 'agy-subagent-badge-duration'), 'expected duration chip on Overview subagent badge');
+  assert.match(collectText(findTestId(subBadge, 'agy-subagent-badge-duration')), /38s/);
+  assert.equal(findTestId(subBadge, 'agy-subagent-badge-tokens'), null, 'tokens chip must stay hidden when subagentBadgeTokens is false');
+
+  p.context.__agyPowertools.dispose();
+});

@@ -185,7 +185,8 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 | Default Overview range | `Current weekly quota` | Choose weekly quota cycle, Today, 24h, Yesterday, This week, This month, 30d, or All time |
 | Context ring | On | Shows context usage ring, cache reuse breakdown, and Orchestrator per-model bars |
 | Speed & statistics | On | Shows the speed dial and opens session telemetry and estimated cost |
-| Task progress | On | Collapsible Overview section with checklist progress, live phase, and step durations |
+| Session duration | Off | Shows live/cumulative worked duration in the composer and opens main session plus per-subagent timing and span breakdown |
+| Task progress | On | Collapsible Overview section with checklist progress, live phase, and step durations (with optional sub-toggle for cumulative session duration) |
 | Show quota in Overview | Off | Collapsible Overview section showing 5-hour and weekly remaining quotas |
 | Titlebar quick overview | Off | Adds a top-right titlebar Powertools trigger to open the full 6-tab popover over your current chat |
 | Composer quota halo | Off | Draws remaining quota clockwise around the composer card (emerald, amber, or red) |

@@ -84,6 +84,26 @@ test('parseSessionData aggregates tokens, cache hit rate, and tool count for SYS
     assert.equal(parsed.telemetry.cacheHitPercent, 40);
     assert.equal(parsed.telemetry.toolCount, 2);
     assert.equal(parsed.telemetry.toolTimeMs, 4000);
+    assert.equal(parsed.telemetry.workedDurationMs, 8000);
+    assert.equal(parsed.telemetry.sessionSpanMs, 8000);
+    assert.equal(parsed.telemetry.completedWorkedDurationMs, 0);
+    assert.equal(parsed.telemetry.activeStartedAtMs, Date.parse('2026-11-21T00:00:00Z'));
+
+    // Multi-wakeup subagent excludes idle suspension gap from workedDurationMs while preserving wall-clock sessionSpanMs
+    const resumedLines = [
+      ...lines,
+      { step_index: 5, type: 'SYSTEM_MESSAGE', content: 'Follow-up instruction after 10m idle', created_at: '2026-11-21T00:10:00Z' },
+      { step_index: 6, type: 'PLANNER_RESPONSE', input_tokens: 4000, cache_read_tokens: 12000, output_tokens: 200, tool_calls: [{ name: 'send_message', args: {} }], created_at: '2026-11-21T00:10:02Z' },
+      { step_index: 7, type: 'GENERIC', content: 'Created At: 2026-11-21T00:10:03Z\nCompleted At: 2026-11-21T00:10:05Z\ndone', created_at: '2026-11-21T00:10:03Z' }
+    ];
+    writeFileSync(join(logsDir, 'transcript.jsonl'), resumedLines.map(l => JSON.stringify(l)).join('\n') + '\n');
+    const resumed = parseSessionData(subId, { includeSessions: false, strict: true });
+    assert.equal(resumed.telemetry.workedDurationMs, 13000);
+    assert.equal(resumed.telemetry.completedWorkedDurationMs, 8000);
+    assert.equal(resumed.telemetry.sessionSpanMs, 605000);
+    assert.equal(resumed.telemetry.activeStartedAtMs, Date.parse('2026-11-21T00:10:00Z'));
+    const agg = aggregateSubagentTotals([summarizeSubagentSession(parsed, []), summarizeSubagentSession(resumed, [])]);
+    assert.equal(agg.workedDurationMs, 21000);
   } finally {
     if (prevDir === undefined) delete process.env.ANTIGRAVITY_APP_DATA_DIR;
     else process.env.ANTIGRAVITY_APP_DATA_DIR = prevDir;
