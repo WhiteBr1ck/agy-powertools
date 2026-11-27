@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import vm from 'node:vm';
 import { parseChecklist } from '../lib/progress.mjs';
 import { createPricingStore, estimateCost, parseOfficialPricing, parsePartnerPricing, resolveRate } from '../lib/pricing.mjs';
 import { createQuotaTracker } from '../lib/quota.mjs';
 import { requestEvents, resolveUsageDataDirs, usageDashboard } from '../lib/analytics.mjs';
+import { startNativeIntegration } from '../lib/native-host.mjs';
 test('buffered provider responses use whole-request timing while genuine streamed responses exclude TTFT',()=>{
  const events=requestEvents({generations:[
   {requestId:'same-id',stepIndices:[8],modelName:'model',inputTokens:100,cacheReadTokens:0,outputTokens:1000,thinkingTokens:800,responseTokens:200,ttftMs:9990,streamingMs:10},
@@ -424,4 +426,262 @@ test('usage archive normalizes stale buffered-tail rows in place without wiping 
     assert.equal(persisted.find(r => r.id === 'archived-buffered-tail').tpsMode, 'whole');
     assert.equal(persisted.find(r => r.id === 'archived-buffered-tail').tps, 92.3);
   } finally { rmSync(profile, { recursive: true, force: true }); }
+});
+
+function writeSyntheticConversationDb(baseDir, convId, { requestId, model = 'Gemini 4 Carbon (High)', inTok, cacheTok = 0, outTok = 10, sec }) {
+  const varint = value => {
+    const bytes = [];
+    let n = BigInt(value);
+    do {
+      let b = Number(n & 127n);
+      n >>= 7n;
+      if (n) b |= 128;
+      bytes.push(b);
+    } while (n);
+    return Buffer.from(bytes);
+  };
+  const integer = (n, value) => Buffer.concat([varint(n * 8), varint(value)]);
+  const bytesField = (n, value) => {
+    const buf = Buffer.from(value);
+    return Buffer.concat([varint(n * 8 + 2), varint(buf.length), buf]);
+  };
+  const concat = (...parts) => Buffer.concat(parts);
+  const convDir = join(baseDir, 'conversations');
+  mkdirSync(convDir, { recursive: true });
+  const dbPath = join(convDir, `${convId}.db`);
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS gen_metadata(idx INTEGER PRIMARY KEY, data BLOB); CREATE TABLE IF NOT EXISTS steps(idx INTEGER PRIMARY KEY, step_type INTEGER, metadata BLOB);');
+    const chat = concat(
+      bytesField(4, concat(integer(2, inTok), integer(3, outTok), integer(5, cacheTok))),
+      bytesField(11, integer(1, 1)),
+      bytesField(12, integer(1, 2)),
+      bytesField(20, concat(bytesField(1, 'request_id'), bytesField(2, requestId))),
+      bytesField(21, model)
+    );
+    const gen = concat(bytesField(1, chat), integer(2, 1), bytesField(4, convId));
+    db.prepare('INSERT OR REPLACE INTO gen_metadata(idx, data) VALUES (0, ?)').run(gen);
+    const stepMeta = concat(bytesField(1, integer(1, sec)), bytesField(8, integer(1, sec + 2)));
+    db.prepare('INSERT OR REPLACE INTO steps(idx, step_type, metadata) VALUES (1, 2, ?)').run(stepMeta);
+  } finally {
+    db.close();
+  }
+  return dbPath;
+}
+
+test('usageDashboard persists db-events-cache incrementally, purges deleted DBs, and keeps force full-rescan semantics', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'agy-db-cache-inc-'));
+  try {
+    const sec = Math.floor(Date.now() / 1000) - 3600;
+    const dbA = writeSyntheticConversationDb(profile, 'conv-a', { requestId: 'req-a', inTok: 100, sec });
+    const dbB = writeSyntheticConversationDb(profile, 'conv-b', { requestId: 'req-b', inTok: 105, sec: sec + 10 });
+    utimesSync(dbA, sec, sec);
+    utimesSync(dbB, sec + 10, sec + 10);
+
+    const initial = usageDashboard(profile, { includeCli: false, maxAgeMs: 0 });
+    assert.equal(initial.totalRequests, 2);
+    const dbCachePath = join(profile, 'plugin_data', 'agy-powertools', 'db-events-cache.json');
+    assert.equal(existsSync(dbCachePath), true);
+    const savedInitial = JSON.parse(readFileSync(dbCachePath, 'utf8'));
+    assert.equal(savedInitial.version, 1);
+    assert.deepEqual(Object.keys(savedInitial.files).sort(), ['conv-a.db', 'conv-b.db']);
+
+    // Same size & same pinned mtime: maxAgeMs:0 skips 30s summary cache but reuses unchanged DB cache
+    writeSyntheticConversationDb(profile, 'conv-a', { requestId: 'req-a', inTok: 120, sec });
+    utimesSync(dbA, sec, sec);
+    const incrementalSameStamp = usageDashboard(profile, { includeCli: false, maxAgeMs: 0 });
+    assert.equal(incrementalSameStamp.requests.find(r => r.id === 'req-a').inputTokens, 100);
+
+    // Updating conv-b with a new timestamp updates only conv-b incrementally
+    writeSyntheticConversationDb(profile, 'conv-b', { requestId: 'req-b', inTok: 125, sec: sec + 20 });
+    utimesSync(dbB, sec + 20, sec + 20);
+    const incrementalChanged = usageDashboard(profile, { includeCli: false, maxAgeMs: 0 });
+    assert.equal(incrementalChanged.requests.find(r => r.id === 'req-a').inputTokens, 100);
+    assert.equal(incrementalChanged.requests.find(r => r.id === 'req-b').inputTokens, 125);
+
+    // force:true continues to bypass stamp check and reread all SQLite files
+    const forced = usageDashboard(profile, { includeCli: false, force: true });
+    assert.equal(forced.requests.find(r => r.id === 'req-a').inputTokens, 120);
+
+    // Deleting all DBs purges stale entries from db-events-cache.json
+    rmSync(dbA);
+    rmSync(dbB);
+    usageDashboard(profile, { includeCli: false, maxAgeMs: 0 });
+    const savedPurged = JSON.parse(readFileSync(dbCachePath, 'utf8'));
+    assert.deepEqual(savedPurged.files, {});
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('usageDashboard hydrates from valid db-events-cache across cold key switches and falls back on corrupt or mismatched versions', () => {
+  const profileA = mkdtempSync(join(tmpdir(), 'agy-db-cache-cold-a-'));
+  const profileB = mkdtempSync(join(tmpdir(), 'agy-db-cache-cold-b-'));
+  try {
+    const sec = Math.floor(Date.now() / 1000) - 1800;
+    const dbPath = writeSyntheticConversationDb(profileA, 'conv-cold', { requestId: 'from-sqlite', inTok: 42, sec });
+    const s = statSync(dbPath);
+    const stamp = `${s.mtimeMs}:${s.size}|`;
+    const pluginDataDir = join(profileA, 'plugin_data', 'agy-powertools');
+    mkdirSync(pluginDataDir, { recursive: true });
+    const dbCachePath = join(pluginDataDir, 'db-events-cache.json');
+
+    writeFileSync(dbCachePath, JSON.stringify({
+      version: 1,
+      files: {
+        'conv-cold.db': {
+          stamp,
+          events: [{
+            id: 'from-disk-cache',
+            conversationId: 'conv-cold',
+            timestampMs: sec * 1000,
+            model: 'Gemini 4 Carbon (High)',
+            inputTokens: 77,
+            cacheReadTokens: 0,
+            outputTokens: 10,
+            retryErrors: [],
+            status: 'success',
+            error: ''
+          }]
+        }
+      }
+    }));
+
+    // Switch cacheKey away and back to force cold hydration from disk cache
+    usageDashboard(profileB, { includeCli: false });
+    const hydrated = usageDashboard(profileA, { includeCli: false, maxAgeMs: 0 });
+    assert.equal(hydrated.requests.length, 1);
+    assert.equal(hydrated.requests[0].id, 'from-disk-cache');
+
+    // Corrupt JSON must fall back cleanly to reading SQLite
+    usageDashboard(profileB, { includeCli: false });
+    writeFileSync(dbCachePath, '{corrupt-json');
+    const recoveredFromCorrupt = usageDashboard(profileA, { includeCli: false, maxAgeMs: 0 });
+    assert.equal(recoveredFromCorrupt.requests[0].id, 'from-sqlite');
+
+    // Unsupported cache version must also fall back cleanly
+    usageDashboard(profileB, { includeCli: false });
+    writeFileSync(dbCachePath, JSON.stringify({ version: 999, files: { 'conv-cold.db': { stamp, events: [] } } }));
+    const recoveredFromVersion = usageDashboard(profileA, { includeCli: false, maxAgeMs: 0 });
+    assert.equal(recoveredFromVersion.requests[0].id, 'from-sqlite');
+  } finally {
+    rmSync(profileA, { recursive: true, force: true });
+    rmSync(profileB, { recursive: true, force: true });
+  }
+});
+
+test('usageDashboard honors maxAgeMs cache TTL and invalidates archiveMemCache when usage-history-cache changes on disk', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'agy-archive-ttl-'));
+  try {
+    const dir = join(profile, 'plugin_data', 'agy-powertools');
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    const archivePath = join(dir, 'usage-history-cache.json');
+    const makeRec = (id, deltaMs) => ({
+      id,
+      conversationId: 'archived-conv',
+      timestampMs: now - deltaMs,
+      model: 'Gemini 4 Carbon (High)',
+      inputTokens: 10,
+      cacheReadTokens: 0,
+      outputTokens: 5,
+      retryErrors: []
+    });
+
+    writeFileSync(archivePath, JSON.stringify([makeRec('r1', 1000)]));
+    assert.deepEqual(usageDashboard(profile, { includeCli: false, maxAgeMs: 0 }).requests.map(r => r.id), ['r1']);
+
+    // Mutate archive on disk; large maxAgeMs serves summary cache, while maxAgeMs:0 invalidates archiveMemCache via fileStamp
+    writeFileSync(archivePath, JSON.stringify([makeRec('r1', 1000), makeRec('r2-extra-long', 500)]));
+    assert.deepEqual(usageDashboard(profile, { includeCli: false, maxAgeMs: 60000 }).requests.map(r => r.id), ['r1']);
+    assert.deepEqual(usageDashboard(profile, { includeCli: false, maxAgeMs: 0 }).requests.map(r => r.id), ['r2-extra-long', 'r1']);
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
+});
+
+test('native-host dashboard and quota.observe avoid forced full DB rescans by default', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'agy-host-incremental-'));
+  const appDir = join(root, 'antigravity');
+  const dataDir = join(root, 'plugin-data');
+  const portFile = join(root, 'port');
+  const origin = 'https://127.0.0.1:5124';
+  const prevEnvDir = process.env.ANTIGRAVITY_APP_DATA_DIR;
+  const fetchBefore = globalThis.fetch;
+  let stop, receiveEvent, lastReply;
+  try {
+    mkdirSync(appDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
+    process.env.ANTIGRAVITY_APP_DATA_DIR = appDir;
+    const sec = Math.floor(Date.now() / 1000) - 600;
+    const resetTimeMs = (sec + 3600) * 1000;
+    const dbPath = writeSyntheticConversationDb(appDir, 'conv-host', { requestId: 'host-req-1', inTok: 100_000, sec });
+    utimesSync(dbPath, sec, sec);
+
+    writeFileSync(portFile, '12346\n');
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ enabled: true, multiAccount: false, pricingMode: 'standard' }));
+    globalThis.fetch = async () => ({ json: async () => [{ id: 'w1', type: 'page', title: 'Antigravity', url: origin + '/c/a', webSocketDebuggerUrl: 'ws://127.0.0.1:12346/devtools/page/a' }] });
+
+    stop = startNativeIntegration({
+      portFile,
+      dataDir,
+      platform: 'darwin',
+      home: root,
+      parseSessionData: () => ({}),
+      onStatus: () => {},
+      discover: async () => [],
+      connect: async () => ({
+        socket: { addEventListener() {}, close() {} },
+        onEvent(cb) { receiveEvent = cb; },
+        async send(method, params) {
+          if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame' } } };
+          if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' };
+          if (params?.expression?.startsWith('globalThis.__agyPowertoolsReceive?.(')) {
+            vm.runInNewContext(params.expression, { __agyPowertoolsReceive: (_id, data) => { lastReply = JSON.parse(JSON.stringify(data)); } });
+          }
+          return { result: { value: false } };
+        }
+      })
+    });
+
+    await stop.ready;
+    await receiveEvent({ method: 'Runtime.executionContextCreated', params: { context: { id: 9, origin, auxData: { isDefault: true, frameId: 'frame' } } } });
+    const rpc = async (method, payload = {}) => {
+      lastReply = null;
+      await receiveEvent({ method: 'Runtime.bindingCalled', params: { name: '__agyPowertoolsHost', executionContextId: 9, payload: JSON.stringify({ id: 1, method, ...payload }) } });
+      return lastReply;
+    };
+
+    const first = await rpc('dashboard', { force: true });
+    assert.equal(first.totalRequests, 1);
+    assert.equal(first.requests[0].inputTokens, 100_000);
+
+    // Same 3-byte varint size (100_000 -> 200_000) and pinned mtime: neither dashboard(force:true) nor quota.observe forces a full DB rescan
+    writeSyntheticConversationDb(appDir, 'conv-host', { requestId: 'host-req-1', inTok: 200_000, sec });
+    utimesSync(dbPath, sec, sec);
+
+    const refreshClick = await rpc('dashboard', { force: true });
+    assert.equal(refreshClick.requests[0].inputTokens, 100_000);
+
+    const obsReply = await rpc('quota.observe', {
+      groups: [{ displayName: 'Gemini Models', buckets: [{ bucketId: 'gemini-5h', window: '5h', remainingFraction: 0.99, resetTimeMs }] }],
+      accountKey: 'user@example.com'
+    });
+    assert.equal(obsReply.skipped, undefined);
+    assert.equal(obsReply.estimates[0].observedRequests, 1);
+    const savedSamples = JSON.parse(readFileSync(join(dataDir, 'quota-samples.json'), 'utf8'));
+    assert.equal(savedSamples[0].checkpoints.at(-1).observedTokens, 100_010);
+
+    // Real incremental addition (new file / changed stamp) is picked up immediately on dashboard(force:true)
+    const db2 = writeSyntheticConversationDb(appDir, 'conv-host-2', { requestId: 'host-req-2', inTok: 50, sec: sec + 60 });
+    utimesSync(db2, sec + 60, sec + 60);
+    const afterNewFile = await rpc('dashboard', { force: true });
+    assert.equal(afterNewFile.totalRequests, 2);
+  } finally {
+    await stop?.();
+    globalThis.fetch = fetchBefore;
+    if (prevEnvDir === undefined) delete process.env.ANTIGRAVITY_APP_DATA_DIR;
+    else process.env.ANTIGRAVITY_APP_DATA_DIR = prevEnvDir;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
