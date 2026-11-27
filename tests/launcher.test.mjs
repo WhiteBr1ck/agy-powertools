@@ -745,6 +745,14 @@ test('parseFileUriAnchor, discoverOpenWithApps, and openFileWithApp detect insta
   assert.deepEqual(parseFileUriAnchor('file:///repo/a.js#L18C7-L25'), { line: 18, column: 7 });
   assert.deepEqual(parseFileUriAnchor('file:///repo/a.js#L9:3'), { line: 9, column: 3 });
   assert.deepEqual(parseFileUriAnchor('file:///repo/README.md#overview'), { line: null, column: null });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/get_search_suggest.go:371'), { line: 371, column: null });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/get_search_suggest.go:2386-2446'), { line: 2386, column: null });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/get_search_suggest.go:371:12'), { line: 371, column: 12 });
+  assert.deepEqual(parseFileUriAnchor('file:///repo/get_search_suggest.go%3A371'), { line: 371, column: null });
+  assert.equal(resolveLocalFilePath('file:///repo/get_search_suggest.go:371', { platform: 'darwin' }), '/repo/get_search_suggest.go');
+  assert.equal(resolveLocalFilePath('file:///repo/get_search_suggest.go:2386-2446', { platform: 'darwin' }), '/repo/get_search_suggest.go');
+  assert.equal(resolveLocalFilePath('file:///repo/get_search_suggest.go:371:12', { platform: 'darwin' }), '/repo/get_search_suggest.go');
+  assert.equal(resolveLocalFilePath('file:///C:/repo/a.go:371:8', { platform: 'win32' }), 'C:\\repo\\a.go');
 
   const wslResolved = resolveLocalFilePath('file://wsl.localhost/Ubuntu/home/dev/app.ts#L12', { platform: 'linux' });
   assert.equal(wslResolved, '/home/dev/app.ts');
@@ -796,6 +804,22 @@ test('parseFileUriAnchor, discoverOpenWithApps, and openFileWithApp detect insta
     assert.equal(resZed.appId, 'zed');
     assert.deepEqual(calls[1].args, [`${posixFile}:27:4`]);
 
+    const golandBin = join(posixBin, 'goland');
+    const resGoland = await openFileWithApp('file:///workspace/main.mjs:371:12', 'goland', {
+      platform: 'linux',
+      env: { PATH: posixBin },
+      home: '/mock/home',
+      exists: p => linuxExists(p) || p === golandBin,
+      readdir: () => [],
+      stat: () => ({ isDirectory: () => false }),
+      spawnProcess: fakeSpawn
+    });
+    assert.equal(resGoland.appId, 'goland');
+    assert.equal(resGoland.path, posixFile);
+    assert.equal(resGoland.line, 371);
+    assert.equal(resGoland.column, 12);
+    assert.deepEqual(calls[2].args, ['--line', '371', '--column', '12', posixFile]);
+
     await openFileWithApp(uriWithLine, 'kitty', {
       platform: 'linux',
       env: { PATH: posixBin },
@@ -805,7 +829,7 @@ test('parseFileUriAnchor, discoverOpenWithApps, and openFileWithApp detect insta
       stat: () => ({ isDirectory: () => false }),
       spawnProcess: fakeSpawn
     });
-    assert.equal(calls[2].opts.cwd, '/workspace');
+    assert.equal(calls[3].opts.cwd, '/workspace');
 
     await assert.rejects(
       () => openFileWithApp(uriWithLine, 'windsurf', {
