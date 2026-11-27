@@ -103,6 +103,7 @@
 - **Session branching and inline editing**: Fork a new chat from any reply or conversation menu with full history preserved (including chats that used subagents), or edit a sent message in place using Antigravity's native composer.
 - **Multi-account switching (off by default)**: Uses Windows Credential Manager, macOS Keychain, or Linux Secret Service to keep multiple Google accounts isolated without plaintext tokens; check 5-hour/weekly quotas and switch from the sidebar, with optional auto-switch on depletion.
 - **No-TUN application proxy (off by default)**: Injects proxy flags and environment variables for Antigravity alone on relaunch, with HTTP CONNECT / SOCKS5 testing, cold-start prompts, and optional `GODEBUG=http2client=0` to reduce `EOF` disconnects.
+  On Windows, start your proxy client before opening Antigravity. The normal shortcut starts Antigravity first; once the inspector starts and the proxy port is reachable, it can restart Antigravity once with the saved settings. If the native controls are missing, open **Plugins → Powertools** to check connection status or request the restart manually.
 - **SSH remote and WSL2 support**: Reads remote session, subagent, and dashboard metrics in desktop `SSH` windows over local OpenSSH without installing anything on the server; supports Windows Antigravity with built-in WSL2 backends across NAT and Mirrored networking, hybrid credential storage, and relaunch delegation.
 - **File context menu and small utilities**: Right-click file links or Files tree entries to attach to chat, open, reveal in folder, copy the file, or copy its path (including LAN NAS / SMB paths on Windows); adds collapsible Overview Task Progress and Quota panels, titlebar unread counts, optional composer quota ring, and optional user bubble tint.
 
@@ -145,6 +146,18 @@ sh ./install.sh
 ```
 
 Reinstalling keeps your saved settings and does not force-close Antigravity. Restart Antigravity once you finish your current task; **Powertools** will appear in the left sidebar. On macOS, no duplicate `.app` launcher is created: opening the original `Antigravity.app` automatically relaunches once with the debug flag when needed (with built-in loop protection, and a toggle in Settings or Plugins -> Powertools to switch to manual restart anytime).
+
+### Optional: start directly on macOS
+
+To skip the cold-start restart, quit Antigravity with **⌘Q**, start your proxy if you use one, then run:
+
+```sh
+node "$HOME/.gemini/config/plugins/agy-powertools/scripts/launch-macos.mjs"
+```
+
+You can use the same command in a shell alias, Raycast, or Alfred. If `node` is not on the launcher's PATH, replace it with `"$HOME/Library/Application Support/Antigravity/bin/agy-node"`. The command opens the original app with `--remote-debugging-port=0`. On each launch it reads `~/.gemini/antigravity/plugin_data/agy-powertools/settings.json`: when the application proxy is enabled, it also supplies `--proxy-server`, `--proxy-bypass-list`, the upper- and lowercase `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` variables, `AGY_POWERTOOLS_PROXY_SPEC`, and (for Force HTTP/1.1) `GODEBUG=http2client=0`.
+
+If Antigravity is already running, the command brings it forward; settings cannot be injected into an existing process. You can still launch from the original Dock icon as usual.
 
 ### Updates and uninstall
 

@@ -5,7 +5,7 @@
   ],
   "env": {
     "AGY_POWERTOOLS_VERSION": "2.16.10",
-    "NODE_USE_ENV_PROXY": "1"
+    "NODE_USE_ENV_PROXY": "0"
   },
   "restart_policy": "always",
   "display_name": "Powertools",

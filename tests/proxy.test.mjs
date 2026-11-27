@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import https from 'node:https';
 import net from 'node:net';
 import {
@@ -93,6 +95,15 @@ test('inspectProxyRuntime classifies disabled, not-applied, active, config-chang
   assert.equal(cold.reason, 'not-applied');
   assert.equal(cold.mismatch, true);
 
+  // The standard Windows shortcut does not set Chromium's proxy flags. Even
+  // a matching inherited HTTP proxy cannot stand in for a managed launch.
+  for (const port of [7897, 8080]) {
+    const inherited = inspectProxyRuntime({ proxyEnabled: true, proxyUrl: 'http://127.0.0.1:7897' }, { HTTPS_PROXY: `http://127.0.0.1:${port}` });
+    assert.equal(inherited.reason, 'not-applied');
+    assert.equal(inherited.mismatch, true);
+    assert.equal(inherited.managedByPowertools, false);
+  }
+
   // Active managed session matches exactly
   const spec = proxySpecFromSettings({ proxyEnabled: true, proxyUrl: 'http://127.0.0.1:7897', proxyBypass: DEFAULT_PROXY_BYPASS, proxyForceHttp1: true });
   const active = inspectProxyRuntime(
@@ -117,6 +128,27 @@ test('inspectProxyRuntime classifies disabled, not-applied, active, config-chang
   );
   assert.equal(needsDisable.reason, 'needs-disable');
   assert.equal(needsDisable.mismatch, true);
+});
+
+test('inspector runtime can bootstrap and reach local CDP with a SOCKS5h proxy (#93)', () => {
+  const { env: manifestEnv } = JSON.parse(readFileSync(new URL('../sidecars/inspector/sidecar.json', import.meta.url)));
+  assert.equal(manifestEnv.NODE_USE_ENV_PROXY, '0', 'Inspector must override inherited NODE_USE_ENV_PROXY even on runtimes that ignore it');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/proxy|node_options/i.test(key)));
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { createServer } from 'node:http';
+    await import(${JSON.stringify(new URL('../sidecars/inspector/main.mjs', import.meta.url).href)});
+    const server = createServer((req, res) => res.end('local-cdp'));
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const response = await fetch('http://127.0.0.1:' + server.address().port + '/json/list');
+      console.log(await response.text());
+    } finally { server.close(); }
+  `], {
+    env: { ...env, HTTP_PROXY: 'socks5h://127.0.0.1:1', HTTPS_PROXY: 'socks5h://127.0.0.1:1', ...manifestEnv },
+    encoding: 'utf8', timeout: 10000, windowsHide: true
+  });
+  assert.equal(result.status, 0, result.error?.message || result.stderr);
+  assert.equal(result.stdout.trim(), 'local-cdp');
 });
 
 test('probeProxyConnectivity verifies HTTP CONNECT, HTTP 407, SOCKS5 handshake, and closed ports', async () => {

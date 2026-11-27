@@ -870,11 +870,15 @@ test('maybeAutoRelaunchProxy automatically relaunches once on cold start when no
     assert.equal(rUnreach.reason, 'proxy-unreachable');
     assert.equal(relaunchedCount, 0);
 
-    // 2. Proxy port open -> relaunches once
+    // A pre-existing HTTPS_PROXY on Windows should not suppress the startup
+    // probe: the normal shortcut still lacks the Chromium proxy arguments.
+    const { inspectProxyRuntime } = await import('../lib/proxy.mjs');
+    const inheritedEnv = { ...env, HTTPS_PROXY: 'http://127.0.0.1:7897' };
+    const bootStatus = inspectProxyRuntime({ proxyEnabled: true, proxyUrl: inheritedEnv.HTTPS_PROXY }, inheritedEnv);
     const rOk = await maybeAutoRelaunchProxy({
-      dataDir, home: root, platform: 'win32', env,
+      dataDir, home: root, platform: 'win32', env: inheritedEnv,
       enabled: true, proxyEnabled: true, proxyUrl: 'http://127.0.0.1:7897',
-      runtimeProxyReason: 'not-applied', now: 1_000_000,
+      runtimeProxyReason: bootStatus.reason, now: 1_000_000,
       checkPort: async () => ({ ok: true }),
       relaunch: fakeRelaunch
     });

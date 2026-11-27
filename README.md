@@ -103,6 +103,7 @@
 - **会话分支与消息编辑**：可从任意历史回答或会话菜单分支出新会话（完整保留历史，支持含子智能体的会话）；点击已发消息旁的编辑按钮可直接在原位置修改重发。
 - **多账号切换（默认关闭）**：基于 Windows 凭据管理器、macOS 钥匙串或 Linux Secret Service 本地隔离多个 Google 账号，不落明文令牌；侧栏底部可直接看额度、切号，支持耗尽自动切号。
 - **免 TUN 独立代理（默认关闭）**：无需开启系统全局代理，单独给 Antigravity 注入代理参数和环境变量；内置连通性测试、冷启动未启用提醒，以及可选 `GODEBUG=http2client=0` 缓解 `EOF` 断连。
+  Windows 用户请先启动代理软件，再打开 Antigravity。使用普通快捷方式时，伴生进程会在客户端启动后检查代理端口，端口可达后可自动重启一次以应用已保存的配置。如果原生控件没有显示，可打开 **插件 → Powertools** 查看连接状态或手动请求重启。
 - **SSH 远程与 WSL2 支持**：桌面端连 `SSH` 远端窗口时直接读取远端会话与用量统计，不需要在服务器装插件；Windows Antigravity 开启内置 WSL2 模式时，自动处理跨系统 CDP 连接（兼容 NAT 和 Mirrored）、多账号凭据与重启。
 - **文件右键与其他实用项**：右键消息中的文件链接或右侧文件树可引用到输入框、打开、定位文件夹、复制文件或复制路径（Windows 支持局域网 NAS 共享路径）；右侧概览支持可折叠的任务进度与当前额度，另提供窗口标题未读数、可选输入框额度边框和用户气泡底色。
 
@@ -145,6 +146,18 @@ sh ./install.sh
 ```
 
 覆盖安装会保留已有设置，不会强制关闭客户端。完成当前任务后重启 Antigravity，左侧栏出现 **Powertools** 即可使用。macOS 无需创建第二个 `.app` 图标，正常打开原版 Antigravity 时若未检测到调试端口，插件会自动带参数重启一次生效（内置防循环保护，亦可在设置或右侧「插件 -> Powertools」关闭自动重启并改为手动点击重启）。
+
+### 可选：macOS 一次冷启动直达
+
+如果希望跳过冷启动时的自动重启，先用 **⌘Q** 完全退出 Antigravity；如使用独立代理，请先启动代理软件，再运行：
+
+```sh
+node "$HOME/.gemini/config/plugins/agy-powertools/scripts/launch-macos.mjs"
+```
+
+同一条命令也可以交给终端别名、Raycast 或 Alfred。如果启动器找不到 `node`，可将其替换为 `"$HOME/Library/Application Support/Antigravity/bin/agy-node"`。脚本以 `--remote-debugging-port=0` 打开原版应用，每次启动都会读取 `~/.gemini/antigravity/plugin_data/agy-powertools/settings.json`。启用独立代理时，还会传入 `--proxy-server`、`--proxy-bypass-list`、`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 的大小写两种形式及 `AGY_POWERTOOLS_PROXY_SPEC`；启用「强制 HTTP/1.1」时还会设置 `GODEBUG=http2client=0`。
+
+如果 Antigravity 已在运行，此命令只会将其切到前台，无法为现有进程补加启动参数。仍可照常从 Dock 中的原版图标启动。
 
 ### 更新与卸载
 
