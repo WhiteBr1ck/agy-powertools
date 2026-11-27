@@ -3795,3 +3795,1052 @@ test('composerRingSig gates contextWindow and speedStats fields on their respect
 
   p.context.__agyPowertools.dispose();
 });
+
+test('native-translate slices streaming thinking safely around code blocks and renders safe feathered Markdown', async () => {
+  const translateSrc = readFileSync(new URL('../lib/native-translate.js', import.meta.url), 'utf8');
+  const makeNode = (tag = '#text', value = '') => {
+    const attrs = new Map();
+    const listeners = new Map();
+    const el = {
+      nodeType: tag === '#text' ? 3 : 1,
+      tagName: tag === '#text' ? undefined : String(tag).toUpperCase(),
+      nodeValue: tag === '#text' ? value : undefined,
+      dataset: {},
+      style: {},
+      className: '',
+      classList: {
+        add() {},
+        remove() {}
+      },
+      isConnected: true,
+      parentElement: null,
+      children: [],
+      childNodes: [],
+      attributes: attrs,
+      get firstChild() { return this.childNodes[0] || null; },
+      get firstElementChild() { return this.children[0] || null; },
+      get nextSibling() {
+        const list = this.parentElement?.childNodes || [];
+        const i = list.indexOf(this);
+        return i >= 0 ? (list[i + 1] || null) : null;
+      },
+      append(...items) {
+        for (const item of items) this.appendChild(item);
+      },
+      appendChild(item) {
+        const child = typeof item === 'string' ? makeNode('#text', item) : item;
+        child.parentElement = this;
+        child.isConnected = this.isConnected;
+        this.childNodes.push(child);
+        if (child.nodeType === 1) this.children.push(child);
+        return child;
+      },
+      insertBefore(item, before) {
+        const child = typeof item === 'string' ? makeNode('#text', item) : item;
+        child.parentElement = this;
+        child.isConnected = this.isConnected;
+        const idx = before ? this.childNodes.indexOf(before) : -1;
+        if (idx >= 0) this.childNodes.splice(idx, 0, child);
+        else this.childNodes.push(child);
+        this.children = this.childNodes.filter(n => n.nodeType === 1);
+        return child;
+      },
+      replaceChildren() { this.childNodes = []; this.children = []; },
+      remove() {
+        this.isConnected = false;
+        if (this.parentElement) {
+          this.parentElement.childNodes = this.parentElement.childNodes.filter(n => n !== this);
+          this.parentElement.children = this.parentElement.children.filter(n => n !== this);
+          this.parentElement = null;
+        }
+      },
+      setAttribute(k, v) { attrs.set(k, String(v)); },
+      getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
+      hasAttribute(k) { return attrs.has(k); },
+      removeAttribute(k) { attrs.delete(k); },
+      addEventListener(type, fn) { listeners.set(type, fn); },
+      click() { listeners.get('click')?.({ preventDefault() {}, stopPropagation() {} }); },
+      closest(sel) {
+        for (let cur = this; cur; cur = cur.parentElement) {
+          const tid = cur.getAttribute?.('data-testid');
+          if (tid && sel.includes(`[data-testid="${tid}"]`)) return cur;
+          const ptRoot = cur.getAttribute?.('data-agy-powertools-root');
+          if (ptRoot && sel.includes(`[data-agy-powertools-root="${ptRoot}"]`)) return cur;
+          if (cur.hasAttribute?.('data-agy-powertools-root') && sel.includes('[data-agy-powertools-root]')) return cur;
+          if (cur.hasAttribute?.('data-pt-tip') && sel.includes('[data-pt-tip]')) return cur;
+          if (cur.hasAttribute?.('data-agy-translate-root') && sel.includes('[data-agy-translate-root]')) return cur;
+          if (cur.hasAttribute?.('data-agy-translated') && sel.includes('[data-agy-translated')) return cur;
+        }
+        return null;
+      },
+      querySelector(sel) {
+        const queue = [...this.children];
+        while (queue.length) {
+          const cur = queue.shift();
+          if (sel === '[data-markdown-root]' && cur.hasAttribute('data-markdown-root')) return cur;
+          queue.push(...cur.children);
+        }
+        return null;
+      },
+      querySelectorAll() { return []; },
+      get textContent() {
+        return this.nodeType === 3 ? (this.nodeValue || '') : this.childNodes.map(c => c.textContent).join('');
+      },
+      set textContent(v) {
+        if (this.nodeType === 3) this.nodeValue = String(v);
+        else { this.childNodes = []; this.children = []; if (v) this.appendChild(String(v)); }
+      }
+    };
+    return el;
+  };
+
+  const doc = {
+    head: makeNode('head'),
+    body: makeNode('body'),
+    createElement: tag => makeNode(tag),
+    createTextNode: txt => makeNode('#text', txt),
+    createTreeWalker: root => {
+      const list = [];
+      const walk = n => {
+        if (n.nodeType === 3) list.push(n);
+        for (const c of n.childNodes || []) walk(c);
+      };
+      walk(root);
+      let idx = 0;
+      return { nextNode: () => list[idx++] || null };
+    },
+    querySelectorAll: () => []
+  };
+
+  const ctx = vm.createContext({
+    document: doc,
+    NodeFilter: { SHOW_TEXT: 4 },
+    URL,
+    setTimeout,
+    clearTimeout,
+    MutationObserver: class { observe() {} disconnect() {} }
+  });
+  vm.runInContext(translateSrc, ctx);
+  const helpers = ctx.__agyDetailTranslatorHelpers;
+  assert.ok(helpers);
+
+  // 0. Flow tokenizer keeps backtick code atomic and round-trips losslessly
+  const sampleFlow = '正在检查 `lib/native-ui.js` 中的 flows logic。';
+  const flowTokens = helpers.tokenizeForFlow(sampleFlow);
+  assert.equal(flowTokens.join(''), sampleFlow);
+  assert.ok([...flowTokens].includes('`lib/native-ui.js`'));
+
+  // 1. Slicing protects blank lines inside fenced code blocks and keeps short incomplete streaming tail buffered
+  const openCode = 'Paragraph one explaining `config.mjs`.\n\n```js\nconst a = 1;\n\nconst b = 2;\n```\n\nPartial tail';
+  const s1 = helpers.sliceThinkingSegments(openCode, 0, true);
+  assert.equal(s1.committed.length, 2);
+  assert.ok(s1.committed[0].includes('Paragraph one'));
+  assert.ok(s1.committed[1].includes('const a = 1;\n\nconst b = 2;'));
+  assert.equal(s1.pendingTail, 'Partial tail');
+
+  // Unclosed fence should NOT flush blank line mid-stream
+  const partialFence = '```js\nline 1\n\nline 2';
+  const s2 = helpers.sliceThinkingSegments(partialFence, 0, true);
+  assert.equal(s2.committed.length, 0);
+  assert.equal(s2.pendingTail, partialFence);
+
+  // Flushing when streaming finishes commits tail cleanly
+  const s3 = helpers.sliceThinkingSegments(openCode, s1.nextOffset, false);
+  assert.deepEqual([...s3.committed], ['Partial tail']);
+  assert.equal(s3.pendingTail, '');
+
+  // 2. Safe Markdown rendering: renders formatting & feather chunks and blocks javascript: URLs
+  const mdHost = makeNode('div');
+  helpers.renderMarkdownInto(
+    doc,
+    mdHost,
+    '## Heading\n\nHello **world** `code` [safe](https://example.com) and [xss](javascript:alert(1)).\n\n- item one',
+    { featherFrom: 16 }
+  );
+  const htmlLike = JSON.stringify(mdHost.children.map(c => c.tagName));
+  assert.equal(htmlLike, JSON.stringify(['P', 'P', 'UL']));
+  const serialized = mdHost.textContent;
+  assert.ok(serialized.includes('Heading'));
+  assert.ok(serialized.includes('[xss](javascript:alert(1))'));
+  assert.equal(JSON.stringify(mdHost.children[1].children.map(c => c.tagName)).includes('A'), true);
+  assert.equal(mdHost.children[1].children.filter(c => c.tagName === 'A').length, 1);
+
+  // 3. Full translator lifecycle: zero-collapse pending -> official stagger fade-in + toggle + extended inline scopes + dispose
+  const thinkingWrapper = makeNode('div');
+  const thinkingTrig = makeNode('button');
+  thinkingTrig.setAttribute('data-testid', 'thinking-collapsible-trigger');
+  thinkingTrig.setAttribute('aria-expanded', 'true');
+  const thinkingBody = makeNode('div');
+  const thinkingInner = makeNode('div');
+  const thinkingNativeMd = makeNode('div');
+  thinkingNativeMd.setAttribute('data-markdown-root', 'true');
+  thinkingNativeMd.append('Analyzing the request details thoroughly.');
+  thinkingInner.append(thinkingNativeMd);
+  thinkingBody.append(thinkingInner);
+  thinkingWrapper.append(thinkingTrig, thinkingBody);
+
+  const agentResp = makeNode('div');
+  agentResp.setAttribute('data-testid', 'agent-response');
+  const toolLabel = makeNode('span');
+  const toolTextNode = toolLabel.appendChild('Running smoke diagnostics now');
+  const preToolNarration = makeNode('div');
+  preToolNarration.setAttribute('data-testid', 'planner-response-text');
+  const preToolMd = makeNode('div');
+  preToolMd.setAttribute('data-markdown-root', 'true');
+  preToolMd.append('Preparing environment checks before execution.');
+  preToolNarration.append(preToolMd);
+  const finalPlanner = makeNode('div');
+  finalPlanner.setAttribute('data-testid', 'planner-response-text');
+  const finalPlannerMd = makeNode('div');
+  finalPlannerMd.setAttribute('data-markdown-root', 'true');
+  finalPlannerMd.append('All checks passed cleanly.');
+  finalPlanner.append(finalPlannerMd);
+  agentResp.append(preToolNarration, toolLabel, finalPlanner);
+
+  const idleStatus = makeNode('div');
+  idleStatus.setAttribute('data-testid', 'idle-status-text');
+  const idleSpan = makeNode('span');
+  const idleTextNode = idleSpan.appendChild('Checking remote task queue status');
+  idleStatus.append(idleSpan);
+
+  const subagentNode = makeNode('button');
+  subagentNode.setAttribute('data-testid', 'subagent-node');
+  const subagentLabel = makeNode('span');
+  const subagentTextNode = subagentLabel.appendChild('CB1 Research Auditor');
+  subagentNode.append(subagentLabel);
+
+  const bgTaskRow = makeNode('button');
+  bgTaskRow.setAttribute('data-testid', 'background-task-row');
+  const bgTaskLabel = makeNode('span');
+  const bgTaskTextNode = bgTaskLabel.appendChild('Rebuild studio container on host');
+  bgTaskRow.append(bgTaskLabel);
+
+  const auxTabTitle = makeNode('div');
+  auxTabTitle.className = 'agy-aux-tab-title';
+  const auxTabTextNode = auxTabTitle.appendChild('InstantPlayHub Engineer');
+
+  const progressPanel = makeNode('div');
+  progressPanel.setAttribute('data-agy-powertools-root', 'progress');
+  const trailNode = makeNode('div');
+  trailNode.setAttribute('data-pt-tip', 'echo full command detail');
+  const trailLabel = makeNode('span');
+  trailLabel.className = 'pt-trail-label';
+  const trailTextNode = trailLabel.appendChild('Reinstall and verify frontend hot reload');
+  trailNode.append(trailLabel);
+  progressPanel.append(trailNode);
+
+  doc.querySelectorAll = sel => {
+    if (sel.includes('thinking-collapsible-trigger')) return [thinkingTrig];
+    if (sel.includes('progress-update-response-text')) return [preToolNarration, preToolMd, finalPlanner, finalPlannerMd];
+    if (sel.includes('.pt-trail-label')) return [trailLabel];
+    if (sel.includes('agent-response') || sel.includes('idle-status-text')) {
+      return [agentResp, idleStatus, subagentNode, bgTaskRow, auxTabTitle];
+    }
+    return [];
+  };
+
+  let opts = {
+    enabled: true,
+    language: 'zh-CN',
+    detailTranslation: true,
+    detailTranslationMode: 'replace',
+    detailTranslationEngine: 'openai',
+    detailTranslationFallback: true
+  };
+  const rpcCalls = [];
+  let translatorInstance = null;
+  let resolveSlowStream = null;
+  const reqMock = (method, payload) => {
+    rpcCalls.push({ method, payload });
+    if (method === 'translate.stream') {
+      if (String(payload.text).includes('Preparing environment checks')) {
+        return Promise.resolve({ text: '正在准备执行前的环境检查。', provider: 'openai' });
+      }
+      return new Promise(resolve => {
+        resolveSlowStream = resolve;
+      });
+    }
+    if (method === 'translate.batch') {
+      return Promise.resolve({
+        results: payload.items.map(it => ({
+          id: it.id,
+          text: it.text.includes('hot reload')
+            ? '重装并验证前端热重载'
+            : it.text.includes('task queue')
+              ? '正在检查远端任务队列状态'
+              : it.text.includes('CB1 Research Auditor')
+                ? 'CB1 调研审计员'
+                : it.text.includes('Rebuild studio')
+                  ? '重建主机容器镜像'
+                  : it.text.includes('InstantPlayHub Engineer')
+                    ? 'InstantPlayHub 工程师'
+                    : '正在运行冒烟诊断',
+          provider: 'google-clients5'
+        }))
+      });
+    }
+    return Promise.resolve({ ok: true });
+  };
+
+  translatorInstance = ctx.__agyDetailTranslator({
+    doc,
+    request: reqMock,
+    getOptions: () => opts,
+    uiText: (zh, en) => (opts.language === 'en' ? en : zh),
+    fiber: el => {
+      if (el === thinkingTrig) return { memoizedProps: { thinking: 'Analyzing the request details thoroughly.', thinkingDuration: { seconds: '3' } } };
+      if (el === preToolNarration) return { memoizedProps: { step: { case: 'plannerResponse', status: 3, value: { response: 'Preparing environment checks before execution.', toolCalls: [{ name: 'run_command' }] } } } };
+      if (el === finalPlanner) return { memoizedProps: { step: { case: 'plannerResponse', status: 3, value: { response: 'All checks passed cleanly.', toolCalls: [] } } } };
+      return null;
+    }
+  });
+  translatorInstance.sync();
+  await new Promise(r => setTimeout(r, 30));
+
+  // While slow thinking stream is pending and before first token arrives: nativeMd stays visible (zero layout collapse!) and no skeleton bars exist
+  const blockMount = thinkingInner.children.find(c => c.getAttribute('data-agy-translate-root') === 'block');
+  assert.ok(blockMount);
+  assert.equal(thinkingNativeMd.hasAttribute('data-agy-translate-hidden'), false);
+  assert.equal(thinkingNativeMd.getAttribute('data-agy-translate-pending'), 'true');
+  assert.equal(blockMount.getAttribute('data-agy-translate-hidden'), 'true');
+
+  // Also verify official stagger fade-in animation marks word spans with agy-tr-fade-in and skips replay via seenKeys
+  const mdStaggerHost = makeNode('div');
+  const seen = new Set();
+  helpers.renderMarkdownInto(doc, mdStaggerHost, '第一阶段检查完成。', {
+    animate: true,
+    seenKeys: seen,
+    stagger: { claim: n => Array.from({ length: n }, (_, idx) => idx * 12) }
+  });
+  const firstFrameCount = mdStaggerHost.children?.[0]?.children?.filter(c => c.className === 'agy-tr-word').length || 0;
+  assert.ok(firstFrameCount >= 2);
+  const seenBefore = seen.size;
+  helpers.renderMarkdownInto(doc, mdStaggerHost, '第一阶段检查完成。继续校验。', {
+    animate: true,
+    seenKeys: seen,
+    stagger: { claim: n => Array.from({ length: n }, (_, idx) => idx * 10) }
+  });
+  const secondFrameWords = mdStaggerHost.children?.[0]?.children?.filter(c => c.className === 'agy-tr-word') || [];
+  assert.ok(seen.size > seenBefore);
+  assert.ok(secondFrameWords.length >= 1 && secondFrameWords.every(w => !String(w.textContent).includes('第一阶段')));
+
+  // Pre-tool narration (outside subagent, fiber hasTools=true) translated; final answer without toolCalls untouched
+  assert.ok(preToolNarration.children.find(c => c.getAttribute('data-agy-translate-root') === 'block')?.textContent.includes('正在准备执行前的环境检查。'));
+  assert.equal(finalPlanner.children.find(c => c.getAttribute('data-agy-translate-root') === 'block'), undefined);
+
+  // Now emit stream delta and resolve slow stream
+  const pendingReq = rpcCalls.find(c => c.method === 'translate.stream' && String(c.payload.text).includes('Analyzing'));
+  translatorInstance.handleEvent({ streamId: pendingReq.payload.streamId, type: 'delta', delta: '正在仔细分析' });
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(thinkingNativeMd.getAttribute('data-agy-translate-hidden'), 'true');
+  assert.equal(thinkingNativeMd.hasAttribute('data-agy-translate-pending'), false);
+  assert.equal(blockMount.hasAttribute('data-agy-translate-hidden'), false);
+  // Words inside animated p have agy-tr-fade-in style animation
+  const animatedWord = blockMount.children?.[0]?.children?.[0]?.children?.[0]?.children?.[0];
+  assert.equal(animatedWord?.className, 'agy-tr-word');
+  assert.ok(String(animatedWord?.style?.animation || '').includes('agy-tr-fade-in 0.2s ease-out'));
+
+  translatorInstance.handleEvent({ streamId: pendingReq.payload.streamId, type: 'delta', delta: '请求详情。' });
+  resolveSlowStream({ text: '正在仔细分析请求详情。', provider: 'google-gtx', degraded: true, reason: '429 rate limit' });
+  await new Promise(r => setTimeout(r, 150));
+
+  assert.ok(blockMount.textContent.includes('正在仔细分析请求详情。'));
+  assert.equal(thinkingNativeMd.getAttribute('data-agy-translate-hidden'), 'true');
+  const toggleWrap = thinkingWrapper.children.find(c => c.getAttribute('data-agy-translate-root') === 'toggle');
+  const toggleBtn = toggleWrap?.children?.[1];
+  const degradedDot = toggleWrap?.children?.[0];
+  assert.ok(toggleBtn);
+  assert.equal(toggleBtn.textContent, '原文');
+  assert.equal(degradedDot.hasAttribute('data-agy-translate-hidden'), false);
+  assert.ok(degradedDot.getAttribute('data-pt-tip').includes('429 rate limit'));
+  assert.equal(toggleWrap.getAttribute('data-pinned'), 'true');
+
+  // Toggle to show original text and back
+  toggleBtn.click();
+  assert.equal(thinkingNativeMd.hasAttribute('data-agy-translate-hidden'), false);
+  assert.equal(blockMount.getAttribute('data-agy-translate-hidden'), 'true');
+  assert.equal(toggleBtn.textContent, '译文');
+  toggleBtn.click();
+  assert.equal(thinkingNativeMd.getAttribute('data-agy-translate-hidden'), 'true');
+
+  // Switch to bilingual mode
+  opts = { ...opts, detailTranslationMode: 'bilingual' };
+  translatorInstance.sync();
+  assert.equal(thinkingNativeMd.getAttribute('data-agy-translate-bilingual-src'), 'true');
+
+  // Inline tool translation + idle status + Progress + subagent-node + background-task-row + aux-tab-title all translated
+  assert.equal(toolTextNode.nodeValue, '正在运行冒烟诊断');
+  assert.equal(toolLabel.getAttribute('data-pt-tip'), 'Running smoke diagnostics now');
+  assert.equal(toolLabel.getAttribute('data-agy-translated'), 'inline');
+  assert.equal(idleTextNode.nodeValue, '正在检查远端任务队列状态');
+  assert.equal(trailTextNode.nodeValue, '重装并验证前端热重载');
+  assert.equal(trailNode.getAttribute('data-pt-tip'), 'echo full command detail');
+  assert.equal(trailLabel.hasAttribute('data-pt-tip'), false);
+  assert.equal(subagentTextNode.nodeValue, 'CB1 调研审计员');
+  assert.equal(bgTaskTextNode.nodeValue, '重建主机容器镜像');
+  assert.equal(auxTabTextNode.nodeValue, 'InstantPlayHub 工程师');
+
+  // Dispose cleanly restores native DOM, original inline texts, and prior tooltips
+  translatorInstance.dispose();
+  assert.equal(toolTextNode.nodeValue, 'Running smoke diagnostics now');
+  assert.equal(idleTextNode.nodeValue, 'Checking remote task queue status');
+  assert.equal(trailTextNode.nodeValue, 'Reinstall and verify frontend hot reload');
+  assert.equal(subagentTextNode.nodeValue, 'CB1 Research Auditor');
+  assert.equal(bgTaskTextNode.nodeValue, 'Rebuild studio container on host');
+  assert.equal(auxTabTextNode.nodeValue, 'InstantPlayHub Engineer');
+  assert.equal(toolLabel.hasAttribute('data-pt-tip'), false);
+  assert.equal(toolLabel.hasAttribute('data-agy-translated'), false);
+  assert.equal(thinkingNativeMd.hasAttribute('data-agy-translate-hidden'), false);
+  assert.equal(thinkingNativeMd.hasAttribute('data-agy-translate-bilingual-src'), false);
+  assert.equal(thinkingNativeMd.hasAttribute('data-agy-translate-pending'), false);
+  assert.equal(doc.head.children.length, 0);
+});
+
+test('DetailTranslationSection is wired into native-panels settings UI with privacy note and defaults disabled', () => {
+  const panelsSrc = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
+  const uiSrc = readFileSync(new URL('../lib/native-ui.js', import.meta.url), 'utf8');
+  assert.ok(uiSrc.includes('detailTranslation:false'));
+  assert.ok(panelsSrc.includes('function DetailTranslationSection('));
+  assert.ok(panelsSrc.includes('h(DetailTranslationSection,{options,toggle})'));
+  assert.ok(panelsSrc.includes('agy-setting-row-detailTranslationEngine'));
+  assert.ok(panelsSrc.includes('agy-translate-apikey-input'));
+  assert.ok(panelsSrc.includes('agy-translate-test-btn'));
+  assert.ok(panelsSrc.includes('agy-translate-clear-cache-btn'));
+});
+
+test('subagent narration keeps translation across re-syncs when native markdown hides and translates side-question titles', async () => {
+  const translateSrc = readFileSync(new URL('../lib/native-translate.js', import.meta.url), 'utf8');
+  const makeNode = (tag, value = '') => {
+    const attrs = new Map();
+    const el = {
+      tagName: String(tag).toUpperCase(),
+      nodeType: tag === '#text' ? 3 : 1,
+      nodeValue: tag === '#text' ? value : undefined,
+      dataset: {},
+      style: {},
+      className: '',
+      classList: { add() {}, remove() {} },
+      isConnected: true,
+      parentElement: null,
+      children: [],
+      childNodes: [],
+      getBoundingClientRect() {
+        if (attrs.get('data-agy-translate-hidden') === 'true') return { top: 0, bottom: 0, height: 0, width: 0 };
+        return { top: 120, bottom: 260, height: 140, width: 420 };
+      },
+      append(...items) { for (const it of items) this.appendChild(it); },
+      appendChild(item) {
+        const c = typeof item === 'string' ? makeNode('#text', item) : item;
+        c.parentElement = this;
+        c.isConnected = this.isConnected;
+        this.childNodes.push(c);
+        if (c.nodeType === 1) this.children.push(c);
+        return c;
+      },
+      insertBefore(item, before) {
+        const c = typeof item === 'string' ? makeNode('#text', item) : item;
+        c.parentElement = this;
+        c.isConnected = this.isConnected;
+        const idx = before ? this.childNodes.indexOf(before) : -1;
+        if (idx >= 0) this.childNodes.splice(idx, 0, c);
+        else this.childNodes.push(c);
+        this.children = this.childNodes.filter(n => n.nodeType === 1);
+        return c;
+      },
+      replaceChildren() { this.childNodes = []; this.children = []; },
+      remove() {
+        this.isConnected = false;
+        if (this.parentElement) {
+          this.parentElement.childNodes = this.parentElement.childNodes.filter(n => n !== this);
+          this.parentElement.children = this.parentElement.children.filter(n => n !== this);
+          this.parentElement = null;
+        }
+      },
+      setAttribute(k, v) { attrs.set(k, String(v)); },
+      getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
+      hasAttribute(k) { return attrs.has(k); },
+      removeAttribute(k) { attrs.delete(k); },
+      addEventListener() {},
+      closest(sel) {
+        for (let cur = this; cur; cur = cur.parentElement) {
+          const tid = cur.getAttribute?.('data-testid');
+          if (tid && sel.includes(`[data-testid="${tid}"]`)) return cur;
+          if (cur.hasAttribute?.('data-agy-translate-root') && sel.includes('[data-agy-translate-root]')) return cur;
+          if (cur.hasAttribute?.('data-agy-translate-hidden') && sel.includes('[data-agy-translate-hidden]')) return cur;
+        }
+        return null;
+      },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+      get textContent() {
+        return this.nodeType === 3 ? (this.nodeValue || '') : this.childNodes.map(c => c.textContent).join('');
+      },
+      set textContent(v) {
+        if (this.nodeType === 3) this.nodeValue = String(v);
+        else { this.childNodes = []; this.children = []; if (v) this.appendChild(String(v)); }
+      }
+    };
+    return el;
+  };
+
+  const observers = [];
+  class MockIO {
+    constructor(cb) {
+      this.cb = cb;
+      this.targets = new Set();
+      observers.push(this);
+    }
+    observe(el) {
+      this.targets.add(el);
+      this.cb([{ target: el, isIntersecting: el.getAttribute?.('data-agy-translate-hidden') !== 'true' }]);
+    }
+    disconnect() { this.targets.clear(); }
+  }
+
+  const subConv = makeNode('div');
+  subConv.setAttribute('data-testid', 'subagent-tab-conversation');
+  const bodyHost = makeNode('div');
+  const mdRoot = makeNode('div');
+  mdRoot.setAttribute('data-markdown-root', '');
+  mdRoot.append('The build has completed with status passed.');
+  bodyHost.append(mdRoot);
+  subConv.append(bodyHost);
+
+  const sideTitle = makeNode('div');
+  sideTitle.setAttribute('data-testid', 'side-question-question');
+  const sidePrefix = makeNode('span');
+  sidePrefix.append('Side Question:');
+  const sideTextWrap = makeNode('span');
+  const sideTitleNode = sideTextWrap.appendChild('Checking Current Progress Status');
+  sideTitle.append(sidePrefix, sideTextWrap);
+
+  const doc = {
+    head: makeNode('head'),
+    body: makeNode('body'),
+    createElement: tag => makeNode(tag),
+    createTextNode: txt => makeNode('#text', txt),
+    createTreeWalker: root => {
+      const list = [];
+      const walk = n => {
+        if (n.nodeType === 3) list.push(n);
+        for (const c of n.childNodes || []) walk(c);
+      };
+      walk(root);
+      let idx = 0;
+      return { nextNode: () => list[idx++] || null };
+    },
+    querySelectorAll: sel => {
+      if (sel.includes('subagent-tab-conversation') && sel.includes('data-markdown-root')) return [mdRoot];
+      if (sel.includes('side-question-question')) return [sideTitle];
+      return [];
+    }
+  };
+
+  const ctx = vm.createContext({
+    document: doc,
+    NodeFilter: { SHOW_TEXT: 4 },
+    URL,
+    setTimeout,
+    clearTimeout,
+    innerHeight: 900,
+    IntersectionObserver: MockIO,
+    MutationObserver: class { observe() {} disconnect() {} }
+  });
+  vm.runInContext(translateSrc, ctx);
+
+  const opts = {
+    enabled: true,
+    language: 'zh-CN',
+    detailTranslation: true,
+    detailTranslationMode: 'replace',
+    detailTranslationEngine: 'free',
+    detailTranslationFallback: true
+  };
+  const translator = ctx.__agyDetailTranslator({
+    doc,
+    request: (method, payload) => {
+      if (method === 'translate.stream') {
+        return Promise.resolve({ text: '构建已完成，状态通过。', provider: 'google-clients5' });
+      }
+      if (method === 'translate.batch') {
+        return Promise.resolve({
+          results: payload.items.map(it => ({
+            id: it.id,
+            text: it.text.includes('Progress') ? '检查当前进度状态' : it.text,
+            provider: 'google-clients5'
+          }))
+        });
+      }
+      return Promise.resolve({ ok: true });
+    },
+    getOptions: () => opts,
+    uiText: (zh, en) => (opts.language === 'en' ? en : zh)
+  });
+
+  translator.sync();
+  await new Promise(r => setTimeout(r, 120));
+
+  // Verify initial translation & non-flow absolute toggle mount on bodyHost
+  const mountEl = bodyHost.children.find(c => c.getAttribute('data-agy-translate-root') === 'block');
+  const toggleWrap = bodyHost.children.find(c => c.getAttribute('data-agy-translate-root') === 'toggle');
+  assert.ok(mountEl);
+  assert.ok(mountEl.textContent.includes('构建已完成'));
+  assert.equal(mdRoot.getAttribute('data-agy-translate-hidden'), 'true');
+  assert.equal(bodyHost.getAttribute('data-agy-translate-host'), 'true');
+  assert.ok(toggleWrap && toggleWrap.className === 'agy-tr-toggle-wrap');
+  assert.equal(String(doc.head.children[0]?.textContent || '').includes('.agy-tr-narration-bar'), false);
+  assert.equal(sideTitleNode.nodeValue, '检查当前进度状态');
+
+  // Simulate real browser IO reporting any hidden node (including mdRoot) as non-intersecting, then re-sync!
+  for (const io of observers) {
+    const entries = [...io.targets].map(t => ({
+      target: t,
+      isIntersecting: t.getAttribute?.('data-agy-translate-hidden') !== 'true'
+    }));
+    if (entries.length) io.cb(entries);
+  }
+  translator.sync();
+  await new Promise(r => setTimeout(r, 40));
+
+  // Translation MUST remain intact (no revert to English!)
+  assert.equal(mdRoot.getAttribute('data-agy-translate-hidden'), 'true');
+  assert.equal(mountEl.isConnected, true);
+  assert.ok(mountEl.textContent.includes('构建已完成'));
+
+  translator.dispose();
+  assert.equal(sideTitleNode.nodeValue, 'Checking Current Progress Status');
+  assert.equal(bodyHost.hasAttribute('data-agy-translate-host'), false);
+});
+
+test('native-translate merges streaming sentences per natural paragraph, prevents out-of-order tailEl, and reuses paragraph cache on collapse/re-expand', async () => {
+  const source = readFileSync(new URL('../lib/native-translate.js', import.meta.url), 'utf8');
+  const makeRichDom = () => {
+    const observers = [];
+    class FakeIO {
+      constructor(cb) { this.cb = cb; this.targets = new Set(); observers.push(this); }
+      observe(el) { this.targets.add(el); }
+      disconnect() { this.targets.clear(); }
+    }
+    const matchesCompound = (el, part) => {
+      if (!el || el.nodeType !== 1) return false;
+      const tokens = part.trim().split(/\s+/);
+      const matchSingle = (node, atom) => {
+        if (!node || node.nodeType !== 1) return false;
+        let rest = atom;
+        for (const nm of atom.matchAll(/:not\(([^)]+)\)/g)) {
+          if (matchSingle(node, nm[1])) return false;
+          rest = rest.replace(nm[0], '');
+        }
+        for (const bm of rest.matchAll(/\[([^=\]*"]+)(\*?=)"([^"]*)"\]/g)) {
+          const val = node.getAttribute(bm[1]);
+          if (bm[2] === '=' ? val !== bm[3] : (val == null || !val.includes(bm[3]))) return false;
+          rest = rest.replace(bm[0], '');
+        }
+        for (const pm of rest.matchAll(/\[([^\]=*"]+)\]/g)) {
+          if (!node.hasAttribute(pm[1])) return false;
+          rest = rest.replace(pm[0], '');
+        }
+        for (const cm of rest.matchAll(/\.([a-zA-Z0-9_-]+)/g)) {
+          if (!String(node.className || '').split(/\s+/).includes(cm[1])) return false;
+          rest = rest.replace(cm[0], '');
+        }
+        if (rest && /^[a-zA-Z0-9]+$/.test(rest) && String(node.tagName || '').toLowerCase() !== rest.toLowerCase()) return false;
+        return rest.replace(/[^a-zA-Z0-9]/g, '') === '' || !/^[a-zA-Z]/.test(rest);
+      };
+      if (!matchSingle(el, tokens[tokens.length - 1])) return false;
+      let cur = el.parentElement;
+      for (let t = tokens.length - 2; t >= 0; t--) {
+        while (cur && !matchSingle(cur, tokens[t])) cur = cur.parentElement;
+        if (!cur) return false;
+        cur = cur.parentElement;
+      }
+      return true;
+    };
+    const makeNode = (tag, value = '') => {
+      const el = {
+        nodeType: tag === '#text' ? 3 : 1,
+        tagName: String(tag || 'div').toUpperCase(),
+        attrs: {},
+        style: {},
+        dataset: {},
+        childNodes: [],
+        children: [],
+        parentElement: null,
+        nodeValue: tag === '#text' ? String(value) : null,
+        className: '',
+        listeners: new Map(),
+        isConnected: true,
+        _rect: { top: 100, bottom: 180, width: 320, height: 80 },
+        get classList() {
+          return {
+            contains: c => String(el.className || '').split(/\s+/).includes(c),
+            add: (...cs) => { const s = new Set(String(el.className || '').split(/\s+/).filter(Boolean)); for (const c of cs) s.add(c); el.className = [...s].join(' '); },
+            remove: (...cs) => { el.className = String(el.className || '').split(/\s+/).filter(c => c && !cs.includes(c)).join(' '); }
+          };
+        },
+        get nextSibling() {
+          if (!this.parentElement) return null;
+          const idx = this.parentElement.childNodes.indexOf(this);
+          return idx >= 0 && idx + 1 < this.parentElement.childNodes.length ? this.parentElement.childNodes[idx + 1] : null;
+        },
+        get previousSibling() {
+          if (!this.parentElement) return null;
+          const idx = this.parentElement.childNodes.indexOf(this);
+          return idx > 0 ? this.parentElement.childNodes[idx - 1] : null;
+        },
+        get previousElementSibling() {
+          if (!this.parentElement) return null;
+          const idx = this.parentElement.children.indexOf(this);
+          return idx > 0 ? this.parentElement.children[idx - 1] : null;
+        },
+        get firstChild() { return this.childNodes[0] || null; },
+        get firstElementChild() { return this.children[0] || null; },
+        getBoundingClientRect() { return this._rect; },
+        setAttribute(k, v) { this.attrs[k] = String(v); },
+        getAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null; },
+        hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, k); },
+        removeAttribute(k) { delete this.attrs[k]; },
+        addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, []); this.listeners.get(type).push(fn); },
+        appendChild(node) {
+          const item = typeof node === 'string' ? makeNode('#text', node) : node;
+          item.parentElement = this;
+          item.isConnected = this.isConnected;
+          this.childNodes.push(item);
+          if (item.nodeType === 1) this.children.push(item);
+          return item;
+        },
+        append(...items) { for (const it of items) this.appendChild(it); },
+        insertBefore(item, ref) {
+          const idx = this.childNodes.indexOf(ref);
+          if (idx < 0) return this.appendChild(item);
+          item.parentElement = this;
+          item.isConnected = this.isConnected;
+          this.childNodes.splice(idx, 0, item);
+          if (item.nodeType === 1) {
+            const cIdx = this.children.indexOf(ref);
+            if (cIdx >= 0) this.children.splice(cIdx, 0, item);
+            else this.children.push(item);
+          }
+          return item;
+        },
+        replaceChildren(...items) { this.childNodes = []; this.children = []; this.append(...items); },
+        removeChild(child) {
+          this.childNodes = this.childNodes.filter(c => c !== child);
+          this.children = this.children.filter(c => c !== child);
+          child.parentElement = null;
+          return child;
+        },
+        remove() { this.parentElement?.removeChild(this); this.isConnected = false; },
+        matches(sel) { return sel.split(',').some(p => p.trim() && matchesCompound(this, p)); },
+        closest(sel) {
+          for (let cur = this; cur; cur = cur.parentElement) {
+            if (cur.nodeType === 1 && cur.matches(sel)) return cur;
+          }
+          return null;
+        },
+        querySelectorAll(sel) {
+          const out = [];
+          const walk = n => {
+            for (const c of n.children || []) {
+              if (c.matches(sel)) out.push(c);
+              walk(c);
+            }
+          };
+          walk(this);
+          return out;
+        },
+        querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+        get textContent() { return this.nodeType === 3 ? (this.nodeValue || '') : this.childNodes.map(c => c.textContent).join(''); },
+        set textContent(v) { this.childNodes = []; this.children = []; if (v) this.appendChild(String(v)); }
+      };
+      return el;
+    };
+    const doc = {
+      head: makeNode('head'),
+      body: makeNode('body'),
+      createElement: tag => makeNode(tag),
+      createTextNode: txt => makeNode('#text', txt),
+      createTreeWalker: root => {
+        const list = [];
+        const walk = n => { for (const c of n.childNodes || []) { if (c.nodeType === 3) list.push(c); else walk(c); } };
+        walk(root);
+        let i = 0;
+        return { nextNode: () => list[i++] || null };
+      },
+      querySelectorAll: sel => doc.body.querySelectorAll(sel)
+    };
+    return { doc, makeNode, observers, FakeIO };
+  };
+
+  const { doc, makeNode, observers, FakeIO } = makeRichDom();
+  const wrapper = makeNode('div');
+  const trigger = makeNode('button');
+  trigger.setAttribute('data-testid', 'thinking-collapsible-trigger');
+  trigger.setAttribute('aria-expanded', 'true');
+  const bodyWrapper = makeNode('div');
+  const mdRoot = makeNode('div');
+  mdRoot.setAttribute('data-markdown-root', 'true');
+  bodyWrapper.append(mdRoot);
+  wrapper.append(trigger, bodyWrapper);
+  doc.body.append(wrapper);
+
+  const s1 = 'First sentence in the opening paragraph is long enough to commit mid-stream cleanly. ';
+  const s2 = 'Second sentence stays inside the very same paragraph.\n\n';
+  const s3 = 'Second paragraph begins here after a blank line break.';
+  const tailDraft = 'Pending incomplete draft still streaming';
+  let fiberState = { thinking: s1 + tailDraft, isStreaming: true };
+
+  let deferredFirstResolve = null;
+  let streamCalls = 0;
+  const mapEnglish = txt => {
+    if (txt.includes('First sentence') && txt.includes('Second sentence')) return '首段第一句完整流式提交。首段第二句紧随同一自然段。';
+    if (txt.includes('First sentence')) return '首段第一句完整流式提交。';
+    if (txt.includes('Second sentence')) return '首段第二句紧随同一自然段。';
+    if (txt.includes('Second paragraph')) return '第二自然段在空行之后开启。';
+    return `译文：${txt}`;
+  };
+
+  const ctx = vm.createContext({
+    IntersectionObserver: FakeIO,
+    MutationObserver: class { observe() {} disconnect() {} },
+    getComputedStyle: el => ({ display: el.style?.display || '' }),
+    innerHeight: 900,
+    matchMedia: () => ({ matches: true }),
+    setTimeout,
+    clearTimeout,
+    queueMicrotask
+  });
+  vm.runInContext(source, ctx);
+
+  const translator = ctx.__agyDetailTranslator({
+    doc,
+    fiber: () => ({ memoizedProps: { thinking: fiberState.thinking, stepHasNonThinkingContent: !fiberState.isStreaming }, return: null }),
+    request: (method, payload) => {
+      if (method === 'translate.stream') {
+        streamCalls++;
+        if (streamCalls === 1) {
+          return new Promise(resolve => {
+            deferredFirstResolve = () => resolve({ text: mapEnglish(payload.text), provider: 'google-gtx' });
+          });
+        }
+        return Promise.resolve({ text: mapEnglish(payload.text), provider: 'google-gtx' });
+      }
+      return Promise.resolve({ ok: true });
+    },
+    getOptions: () => ({ enabled: true, detailTranslation: true, language: 'zh-CN', detailTranslationMode: 'replace', detailTranslationEngine: 'free' }),
+    uiText: (zh, en) => zh
+  });
+
+  // Trigger initial stream sync while first slice is still in-flight: tailEl MUST stay hidden (no out-of-order jump!)
+  translator.sync();
+  await new Promise(r => setTimeout(r, 20));
+  const mountEl = wrapper.querySelector('[data-agy-translate-root="block"]');
+  assert.ok(mountEl);
+  const tailEl = mountEl.querySelector('.agy-tr-tail');
+  assert.equal(tailEl.getAttribute('data-agy-translate-hidden'), 'true', 'pending tail must wait while earlier segment is incomplete');
+
+  // Complete first sentence -> now tailEl becomes visible below first rendered paragraph
+  deferredFirstResolve();
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(mountEl.querySelectorAll('.agy-tr-seg').length, 1);
+  assert.equal(tailEl.hasAttribute('data-agy-translate-hidden'), false);
+  assert.equal(tailEl.textContent, tailDraft);
+
+  // Advance stream: second sentence closes paragraph 1 + starts paragraph 2 -> MUST merge s1+s2 into 1 .agy-tr-seg!
+  fiberState = { thinking: s1 + s2 + s3, isStreaming: false };
+  translator.sync();
+  await new Promise(r => setTimeout(r, 40));
+  const segEls = mountEl.querySelectorAll('.agy-tr-seg');
+  assert.equal(segEls.length, 2, 'sentences in the same natural paragraph must share one .agy-tr-seg without fake paragraph breaks');
+  assert.equal(segEls[0].querySelectorAll('.agy-tr-p').length, 1);
+  assert.equal(segEls[0].textContent, '首段第一句完整流式提交。首段第二句紧随同一自然段。');
+  assert.equal(segEls[1].textContent, '第二自然段在空行之后开启。');
+  assert.equal(tailEl.getAttribute('data-agy-translate-hidden'), 'true');
+  const callsBeforeCollapse = streamCalls;
+
+  // Collapse thinking block (unmounts bodyWrapper), then re-expand -> MUST reuse completed natural paragraph cache with 0 new IPC calls!
+  bodyWrapper.remove();
+  trigger.setAttribute('aria-expanded', 'false');
+  translator.sync();
+  assert.equal(wrapper.querySelector('[data-agy-translate-root="block"]'), null);
+
+  const reBodyWrapper = makeNode('div');
+  const reMdRoot = makeNode('div');
+  reMdRoot.setAttribute('data-markdown-root', 'true');
+  reBodyWrapper.append(reMdRoot);
+  wrapper.append(reBodyWrapper);
+  trigger.setAttribute('aria-expanded', 'true');
+  translator.sync();
+  await new Promise(r => setTimeout(r, 40));
+  assert.equal(streamCalls, callsBeforeCollapse, 're-expanding collapsed thinking block must hit completed paragraph cache in 0ms');
+  const reMount = wrapper.querySelector('[data-agy-translate-root="block"]');
+  assert.ok(reMount);
+  assert.equal(reMount.querySelectorAll('.agy-tr-seg').length, 2);
+  assert.ok(reMount.textContent.includes('首段第一句完整流式提交。首段第二句紧随同一自然段。'));
+  assert.ok(reMount.textContent.includes('第二自然段在空行之后开启。'));
+  translator.dispose();
+
+  // Second verification: display:contents 0x0 shimmer recovery + expanded inline scopes + background-task-row shell filter
+  const dom2 = makeRichDom();
+  const toolGroup = dom2.makeNode('div');
+  toolGroup.setAttribute('data-testid', 'tool-group-collapsible');
+  toolGroup._rect = { top: 120, bottom: 144, width: 280, height: 24 };
+  const shimmer = dom2.makeNode('span');
+  shimmer.className = 'shimmer-text-content';
+  shimmer.style.display = 'contents';
+  shimmer._rect = { top: 0, bottom: 0, width: 0, height: 0 };
+  const shimmerTxt = dom2.makeNode('#text', 'Planning Stage 4 execution');
+  shimmer.append(shimmerTxt);
+  toolGroup.append(shimmer);
+
+  const sideRow = dom2.makeNode('div');
+  sideRow.setAttribute('data-testid', 'side-question-row');
+  const sideTxt = dom2.makeNode('#text', 'Clarifying question details');
+  sideRow.append(sideTxt);
+
+  const browserRow = dom2.makeNode('div');
+  browserRow.setAttribute('data-testid', 'browser-subagent-row');
+  const browserTxt = dom2.makeNode('#text', 'Navigating target web page');
+  browserRow.append(browserTxt);
+
+  const subGroup = dom2.makeNode('div');
+  subGroup.setAttribute('data-testid', 'subagent-group-title');
+  const subGroupTxt = dom2.makeNode('#text', 'Running verification workers');
+  subGroup.append(subGroupTxt);
+
+  const bgRow = dom2.makeNode('div');
+  bgRow.setAttribute('data-testid', 'background-task-row');
+  const bgDesc = dom2.makeNode('span');
+  bgDesc.className = 'font-mono';
+  const bgDescTxt = dom2.makeNode('#text', 'Monitor background build progress');
+  bgDesc.append(bgDescTxt);
+  const bgCmd = dom2.makeNode('span');
+  bgCmd.className = 'font-mono';
+  const bgCmdTxt = dom2.makeNode('#text', 'npm run test --watch');
+  bgCmd.append(bgCmdTxt);
+  bgRow.append(bgDesc, bgCmd);
+
+  const ptRoot = dom2.makeNode('div');
+  ptRoot.setAttribute('data-agy-powertools-root', 'progress');
+  const ptTitle = dom2.makeNode('div');
+  ptTitle.className = 'pt-progress-title';
+  const ptSubagentTxt = dom2.makeNode('#text', '子智能体运行中：Verify live DOM elements');
+  ptTitle.append(ptSubagentTxt);
+  ptRoot.append(ptTitle);
+
+  dom2.doc.body.append(toolGroup, sideRow, browserRow, subGroup, bgRow, ptRoot);
+
+  const ctx2 = vm.createContext({
+    IntersectionObserver: dom2.FakeIO,
+    MutationObserver: class { observe() {} disconnect() {} },
+    getComputedStyle: el => ({ display: el.style?.display || '' }),
+    innerHeight: 900,
+    setTimeout,
+    clearTimeout,
+    queueMicrotask
+  });
+  vm.runInContext(source, ctx2);
+
+  const tr2 = ctx2.__agyDetailTranslator({
+    doc: dom2.doc,
+    request: (method, payload) => {
+      if (method === 'translate.batch') {
+        return Promise.resolve({
+          results: payload.items.map(it => ({ id: it.id, text: `已译：${it.text}`, provider: 'google-gtx' }))
+        });
+      }
+      return Promise.resolve({ ok: true });
+    },
+    getOptions: () => ({ enabled: true, detailTranslation: true, language: 'zh-CN', detailTranslationMode: 'replace', detailTranslationEngine: 'free' }),
+    uiText: (zh, en) => zh
+  });
+
+  tr2.sync();
+  await new Promise(r => setTimeout(r, 95));
+  assert.equal(shimmerTxt.nodeValue, '已译：Planning Stage 4 execution');
+  assert.equal(sideTxt.nodeValue, '已译：Clarifying question details');
+  assert.equal(browserTxt.nodeValue, '已译：Navigating target web page');
+  assert.equal(subGroupTxt.nodeValue, '已译：Running verification workers');
+  assert.equal(bgDescTxt.nodeValue, '已译：Monitor background build progress');
+  assert.equal(bgCmdTxt.nodeValue, 'npm run test --watch', 'shell commands inside background-task-row .font-mono must stay untranslated');
+  assert.equal(ptSubagentTxt.nodeValue, '子智能体运行中：已译：Verify live DOM elements');
+  assert.equal(dom2.observers[0].targets.has(toolGroup), true, 'display:contents shimmer should observe visible parent box');
+  tr2.dispose();
+});
+
+test('Progress panel localizes Swarm Worker phaseDetail and splits CJK prefix from dynamic subagent title', () => {
+  const i18nSrc = readFileSync(new URL('../lib/native-i18n.js', import.meta.url), 'utf8');
+  const panelsSrc = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
+  const Stub = props => props;
+  const ctx = vm.createContext({
+    document: { nodeType: 9, head: { append() {} }, createElement: () => ({ dataset: {}, textContent: '', remove() {} }), createTreeWalker: () => ({ nextNode: () => null }), querySelectorAll: () => [] },
+    NodeFilter: { SHOW_TEXT: 4 },
+    MutationObserver: class { observe() {} disconnect() {} },
+    location: { pathname: '/' },
+    dq: Stub, Uy: Stub, UP: Stub, VP: Stub, Sy: Stub, HC: null, IC: Stub, JC: Stub,
+    React: {
+      createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+      useSyncExternalStore: (sub, snap) => snap(),
+      useState: init => [typeof init === 'function' ? init() : init, () => {}],
+      useEffect: () => {},
+      useRef: v => ({ current: v }),
+      useMemo: fn => fn()
+    },
+    __agyDashboard: {}
+  });
+  vm.runInContext(i18nSrc, ctx);
+  vm.runInContext(panelsSrc, ctx);
+  const progressState = {
+    conversationId: 'c1',
+    progress: {
+      status: 'running',
+      phase: 'subagent',
+      activeSubagentCount: 1,
+      phaseDetail: 'Swarm Worker (Checking translation output)',
+      toolCount: 3,
+      recentActivity: [],
+      tasks: []
+    },
+    telemetry: { toolCount: 3 },
+    turns: []
+  };
+  const panels = ctx.__agyPanels({
+    t: k => ctx.__agyI18n.t(k, 'zh-CN'),
+    options: () => ({ progress: true, language: 'zh-CN' }),
+    subscribe: () => () => {},
+    revision: () => 1,
+    state: () => progressState,
+    currentState: () => progressState
+  });
+  const tree = panels.Progress();
+  const findByClass = (node, cls) => {
+    if (!node) return null;
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const hit = findByClass(item, cls);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    if (typeof node !== 'object') return null;
+    if (String(node.props?.className || '').split(/\s+/).includes(cls)) return node;
+    return findByClass(node.children, cls) || findByClass(node.props?.children, cls);
+  };
+  const titleEl = findByClass(tree, 'pt-progress-title');
+  assert.ok(titleEl);
+  const expectedPrefix = ctx.__agyI18n.t('Swarm Worker (Checking translation output)', 'zh-CN').replace(/\s*\(Checking translation output\)$/, '');
+  assert.equal(titleEl.props['data-pt-tip'], `子智能体运行中：${expectedPrefix} (Checking translation output)`);
+  assert.deepEqual(
+    titleEl.children.map(c => c.children.join('')),
+    [`子智能体运行中：${expectedPrefix} (`, 'Checking translation output', ')']
+  );
+  // Also verify pre-localized prefix (e.g. when paired with i18n rule) splits identically
+  progressState.progress.phaseDetail = '蜂群成员 (Checking translation output)';
+  const treeLocalized = panels.Progress();
+  const titleElLocalized = findByClass(treeLocalized, 'pt-progress-title');
+  assert.deepEqual(
+    titleElLocalized.children.map(c => c.children.join('')),
+    ['子智能体运行中：蜂群成员 (', 'Checking translation output', ')']
+  );
+  panels.dispose();
+});

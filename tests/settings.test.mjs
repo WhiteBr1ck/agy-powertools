@@ -146,8 +146,36 @@ test('settings persist, merge safely, and reject unknown options without changin
     store.set({language:'en',contextLimit:1000000});assert.equal(store.get().contextLimit,1000000);assert.equal(store.get().language,'en');
     store.set({contextLimit:256000});assert.equal(store.get().contextLimit,256000);
     store.set({contextLimit:0});assert.equal(store.get().contextLimit,0);
+    assert.equal(DEFAULT_SETTINGS.detailTranslation, false);
+    assert.equal(DEFAULT_SETTINGS.detailTranslationMode, 'replace');
+    assert.equal(DEFAULT_SETTINGS.detailTranslationEngine, 'free');
+    assert.equal(DEFAULT_SETTINGS.detailTranslationBaseUrl, '');
+    assert.equal(DEFAULT_SETTINGS.detailTranslationModel, '');
+    assert.equal(DEFAULT_SETTINGS.detailTranslationFallback, true);
+    store.set({
+      detailTranslation: true,
+      detailTranslationMode: 'bilingual',
+      detailTranslationEngine: 'openai',
+      detailTranslationBaseUrl: 'https://api.openai.com/v1///',
+      detailTranslationModel: ' gpt-4o-mini ',
+      detailTranslationFallback: false
+    });
+    assert.equal(store.get().detailTranslation, true);
+    assert.equal(store.get().detailTranslationMode, 'bilingual');
+    assert.equal(store.get().detailTranslationEngine, 'openai');
+    assert.equal(store.get().detailTranslationBaseUrl, 'https://api.openai.com/v1');
+    assert.equal(store.get().detailTranslationModel, 'gpt-4o-mini');
+    assert.equal(store.get().detailTranslationFallback, false);
+    store.set({
+      detailTranslation: false,
+      detailTranslationMode: 'replace',
+      detailTranslationEngine: 'free',
+      detailTranslationBaseUrl: '',
+      detailTranslationModel: '',
+      detailTranslationFallback: true
+    });
     const before = readFileSync(join(directory, 'settings.json'), 'utf8');
-    for (const value of [{ compact: 'false' }, { turnMeta: 'yes' }, { userBubbleTint: 'yes' }, { userBubblePreset: 'neon' }, { userBubbleColor: 'red' }, { userBubbleColor: '#123;color:red' }, { userBubbleStrength: 5 }, { userBubbleStrength: 105 }, { userBubbleStrength: 20.5 }, { sessionSearch: 'yes' }, { sidebarFolderDrop: 'yes' }, { sidebarFolderDropPin: 'yes' }, { composerQuotaHaloWindow: '1d' }, { sidebarRunningBeam: 'yes' }, { sidebarRunningBeamPalette: 'quota' }, { sidebarHideNativeSpinner: 1 }, { sidebarRunningGroup: 'on' }, { unknown: true }, { toString: false }, {language:'invalid'}, {overviewRange:'custom'}, {overviewRange:'invalid'}, {pricingMode:'batch'}, {pricingMode:true}, {accountViewMode:'grid'}, {accountQuotaWindow:'1h'}, {proxyUrl:'ftp://127.0.0.1:21'}, {proxyUrl:'http://127.0.0.1:7897;calc'}, {proxyBypass:'localhost"bad'}, {contextLimit:999999}, []]) assert.throws(() => store.set(value), /设置/);
+    for (const value of [{ compact: 'false' }, { turnMeta: 'yes' }, { userBubbleTint: 'yes' }, { userBubblePreset: 'neon' }, { userBubbleColor: 'red' }, { userBubbleColor: '#123;color:red' }, { userBubbleStrength: 5 }, { userBubbleStrength: 105 }, { userBubbleStrength: 20.5 }, { sessionSearch: 'yes' }, { sidebarFolderDrop: 'yes' }, { sidebarFolderDropPin: 'yes' }, { composerQuotaHaloWindow: '1d' }, { sidebarRunningBeam: 'yes' }, { sidebarRunningBeamPalette: 'quota' }, { sidebarHideNativeSpinner: 1 }, { sidebarRunningGroup: 'on' }, { detailTranslation: 'yes' }, { detailTranslationMode: 'side' }, { detailTranslationEngine: 'anthropic' }, { detailTranslationBaseUrl: 'ftp://bad.example.com' }, { detailTranslationBaseUrl: 'https://user:pass@bad.example.com' }, { detailTranslationModel: 'bad model' }, { detailTranslationFallback: 'no' }, { unknown: true }, { toString: false }, {language:'invalid'}, {overviewRange:'custom'}, {overviewRange:'invalid'}, {pricingMode:'batch'}, {pricingMode:true}, {accountViewMode:'grid'}, {accountQuotaWindow:'1h'}, {proxyUrl:'ftp://127.0.0.1:21'}, {proxyUrl:'http://127.0.0.1:7897;calc'}, {proxyBypass:'localhost"bad'}, {contextLimit:999999}, []]) assert.throws(() => store.set(value), /设置/);
     assert.equal(readFileSync(join(directory, 'settings.json'), 'utf8'), before);
     store.set(DEFAULT_SETTINGS); assert.deepEqual(store.get(), DEFAULT_SETTINGS);
     store.set({ compact: false, language: DEFAULT_SETTINGS.language === 'en' ? 'zh-CN' : 'en' });
@@ -231,6 +259,32 @@ test('stripProxyUrlCredentials and exportSettingsPayload strip proxy auth and ex
   const cleanExport = exportSettingsPayload({ ...DEFAULT_SETTINGS, proxyUrl: 'http://127.0.0.1:7897' });
   assert.equal(cleanExport.strippedProxyAuth, false);
   assert.equal(cleanExport.settings.proxyUrl, 'http://127.0.0.1:7897');
+
+  // Round-trip detailTranslation settings cleanly through exportSettingsPayload & sanitizeImportedSettings
+  const trExport = exportSettingsPayload({
+    ...DEFAULT_SETTINGS,
+    language: 'ja',
+    detailTranslation: true,
+    detailTranslationMode: 'bilingual',
+    detailTranslationEngine: 'openai',
+    detailTranslationBaseUrl: 'https://api.openai.com/v1///',
+    detailTranslationModel: ' gpt-4o-mini ',
+    detailTranslationFallback: false
+  });
+  assert.equal(trExport.settings.language, 'ja');
+  assert.equal(trExport.settings.detailTranslation, true);
+  assert.equal(trExport.settings.detailTranslationMode, 'bilingual');
+  assert.equal(trExport.settings.detailTranslationEngine, 'openai');
+  assert.equal(trExport.settings.detailTranslationBaseUrl, 'https://api.openai.com/v1');
+  assert.equal(trExport.settings.detailTranslationModel, 'gpt-4o-mini');
+  assert.equal(trExport.settings.detailTranslationFallback, false);
+  const trImported = sanitizeImportedSettings(trExport);
+  assert.equal(trImported.patch.detailTranslation, true);
+  assert.equal(trImported.patch.detailTranslationMode, 'bilingual');
+  assert.equal(trImported.patch.detailTranslationEngine, 'openai');
+  assert.equal(trImported.patch.detailTranslationBaseUrl, 'https://api.openai.com/v1');
+  assert.equal(trImported.patch.detailTranslationModel, 'gpt-4o-mini');
+  assert.equal(trImported.patch.detailTranslationFallback, false);
 });
 
 test('sanitizeImportedSettings validates envelope, strips proxy credentials, skips non-portable/unknown/invalid keys, and rejects bad payloads (Issue #88)', () => {
