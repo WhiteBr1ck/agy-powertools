@@ -12,6 +12,7 @@ import {
   resolveSshWindowConfig,
   resolveRemotePosixPath,
   buildRemoteWorkerCode,
+  buildShellBootstrap,
   createRemoteTelemetryBridge
 } from '../lib/ssh-remote.mjs';
 import { parseSessionData } from '../lib/session-parser.mjs';
@@ -659,6 +660,75 @@ test('local state cache invalidates on task.md edits, execution.live/subagent ti
     globalThis.fetch = originalFetch;
     if (originalAppData === undefined) delete process.env.ANTIGRAVITY_APP_DATA_DIR;
     else process.env.ANTIGRAVITY_APP_DATA_DIR = originalAppData;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildShellBootstrap prefers highest node:sqlite-capable Node over older PATH node and falls back cleanly', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agy-ssh-boot-'));
+  const home = join(dir, 'home');
+  const sysBin = join(dir, 'usr-bin');
+  mkdirSync(sysBin, { recursive: true });
+
+  const makeMockNode = (targetPath, { label, sqlite, rank }) => {
+    mkdirSync(join(targetPath, '..'), { recursive: true });
+    const script = [
+      '#!/bin/sh',
+      'for arg in "$@"; do',
+      '  case "$arg" in',
+      '    *1000000*)',
+      sqlite ? `      printf '%s' '${rank}'; exit 0 ;;` : '      exit 1 ;;',
+      '    *node:sqlite*)',
+      sqlite ? '      exit 0 ;;' : '      exit 1 ;;',
+      '    *__AGY_PT__*)',
+      `      printf 'SELECTED:%s\\n' '${label}'; exit 0 ;;`,
+      '  esac',
+      'done',
+      'exit 1',
+      ''
+    ].join('\n');
+    writeFileSync(targetPath, script, { mode: 0o755 });
+  };
+
+  const runBootstrap = () => new Promise((resolve, reject) => {
+    const child = spawn('/bin/sh', ['-s'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { HOME: home, PATH: `${sysBin}:/bin:/usr/bin` }
+    });
+    let out = '', err = '';
+    child.stdout.on('data', c => { out += String(c); });
+    child.stderr.on('data', c => { err += String(c); });
+    child.on('error', reject);
+    child.on('close', code => resolve({ code, out, err }));
+    child.stdin.end(buildShellBootstrap({ systemCandidates: [] }));
+  });
+
+  try {
+    const bootstrap = buildShellBootstrap();
+    assert.equal(bootstrap.trim().includes('\n'), false, 'bootstrap must remain a single line');
+    assert.match(bootstrap, /exec "\$NODE" --no-warnings -e '[^']+'/);
+
+    // 1. Only legacy Node v18 in PATH -> falls back cleanly to legacy PATH node
+    makeMockNode(join(sysBin, 'node'), { label: 'path-v18', sqlite: false, rank: 18020008 });
+    const fallbackRes = await runBootstrap();
+    assert.equal(fallbackRes.code, 0, fallbackRes.err);
+    assert.match(fallbackRes.out, /SELECTED:path-v18/);
+
+    // 2. Legacy v18 in PATH + nvm v8 (lexicographically > v22), v16, v22.22.0, v22.23.3 -> picks highest sqlite-capable v22.23.3
+    makeMockNode(join(home, '.nvm/versions/node/v8.17.0/bin/node'), { label: 'nvm-v8', sqlite: false, rank: 8017000 });
+    makeMockNode(join(home, '.nvm/versions/node/v16.20.2/bin/node'), { label: 'nvm-v16', sqlite: false, rank: 16020002 });
+    makeMockNode(join(home, '.nvm/versions/node/v22.22.0/bin/node'), { label: 'nvm-v22.22.0', sqlite: true, rank: 22022000 });
+    makeMockNode(join(home, '.nvm/versions/node/v22.23.3/bin/node'), { label: 'nvm-v22.23.3', sqlite: true, rank: 22023003 });
+    const upgradedRes = await runBootstrap();
+    assert.equal(upgradedRes.code, 0, upgradedRes.err);
+    assert.match(upgradedRes.out, /SELECTED:nvm-v22\.23\.3/);
+
+    // 3. PATH node already supports node:sqlite -> fast-paths immediately without scanning candidates
+    makeMockNode(join(sysBin, 'node'), { label: 'path-v24', sqlite: true, rank: 24001000 });
+    const fastRes = await runBootstrap();
+    assert.equal(fastRes.code, 0, fastRes.err);
+    assert.match(fastRes.out, /SELECTED:path-v24/);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
