@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,rmSync,symlinkSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,readdirSync,rmSync,symlinkSync,renameSync,lstatSync} from 'node:fs';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {collectPackage,writePackage,encodePackage,decodePackage,validatePackage,sha256,releaseName} from '../lib/package.mjs';
 import {installationPaths,installPlugin,uninstallPlugin,atomicJson} from '../lib/lifecycle.mjs';
-import {runUpdateJob,updateStatus,startUpdate} from '../lib/update-manager.mjs';
+import {runUpdateJob,updateStatus,updateState,startUpdate} from '../lib/update-manager.mjs';
 import {serveRuntime,stopRuntimes,waitForRuntime,runtimeRecords} from '../lib/runtime-control.mjs';
 
 const original=collectPackage(resolve('.')),stop=async()=>{};
@@ -74,6 +74,61 @@ test('invalid package paths, checksums, versions and symlink destinations cannot
 
 test('corrupt configuration is not overwritten during installation',async()=>{
   const s=sandbox();try{writeFileSync(s.paths.config,'{incomplete');await assert.rejects(()=>installPlugin({bundle:original,home:s.home,stop}));assert.equal(readFileSync(s.paths.config,'utf8'),'{incomplete');}finally{s.clean();}
+});
+
+function relocateGemini(s){
+  const target=join(s.root,'relocated gemini');
+  renameSync(s.paths.root,target);
+  symlinkSync(target,s.paths.root,process.platform==='win32'?'junction':'dir');
+  return target;
+}
+
+test('Windows relocated .gemini supports install, update handoff and purge (#96)',{skip:process.platform!=='win32'},async()=>{
+  const s=sandbox();try{
+    const target=relocateGemini(s),marker=join(target,'keep.txt');writeFileSync(marker,'keep');
+    await installPlugin({bundle:older,home:s.home,stop});
+    const bytes=encodePackage(newer),name=releaseName(newer.version);let plan;
+    await startUpdate({home:s.home,currentVersion:older.version,expectedVersion:newer.version,project:{githubUrl:'https://github.com/test/project'},
+      fetcher:async()=>Response.json({tag_name:'v'+newer.version,assets:[{name,state:'uploaded',digest:'sha256:'+sha256(bytes)}]}),
+      launch:async(script,file)=>{assert.ok(existsSync(script));plan=JSON.parse(readFileSync(file));return process.pid;}});
+    assert.equal(plan.home,s.home);assert.equal(updateStatus(s.home).status,'preparing');
+    await runUpdateJob(plan,{fetcher:async()=>new Response(bytes),verify:async()=>{}});
+    assert.equal(updateStatus(s.home).status,'completed');assert.ok(!existsSync(plan.job));
+    assert.equal(JSON.parse(readFileSync(join(target,'config','plugins','agy-powertools','plugin.json'))).version,newer.version);
+    await uninstallPlugin({home:s.home,stop});
+    assert.ok(lstatSync(s.paths.root).isSymbolicLink());assert.equal(readFileSync(marker,'utf8'),'keep');
+    assert.ok(!existsSync(s.paths.installed));assert.ok(!existsSync(s.paths.data));
+  }finally{s.clean();}
+});
+
+test('nested data links remain off limits, including update status cleanup',async()=>{
+  const s=sandbox();try{
+    if(process.platform==='win32')relocateGemini(s);
+    const external=join(s.root,'external'),state=join(external,'plugin_data','agy-powertools','update-state.json');
+    atomicJson(state,{status:'completed',version:older.version});
+    symlinkSync(external,join(s.paths.root,'antigravity'),process.platform==='win32'?'junction':'dir');
+    assert.equal(updateStatus(s.home,older.version).status,'idle');assert.ok(existsSync(state));
+    assert.throws(()=>updateState(s.home,{status:'preparing'}),/符号链接/);
+    await assert.rejects(()=>startUpdate({home:s.home}),/符号链接/);
+    await assert.rejects(()=>installPlugin({bundle:older,home:s.home,stop}),/符号链接/);
+    await assert.rejects(()=>uninstallPlugin({home:s.home,stop}),/符号链接/);
+    assert.deepEqual(readdirSync(join(external,'plugin_data','agy-powertools')),['update-state.json']);
+    assert.equal(JSON.parse(readFileSync(state)).status,'completed');
+  }finally{s.clean();}
+});
+
+test('a POSIX .gemini symlink is still rejected',{skip:process.platform==='win32'},async()=>{
+  const s=sandbox();try{relocateGemini(s);await assert.rejects(()=>installPlugin({bundle:older,home:s.home,stop}),/符号链接/);}finally{s.clean();}
+});
+
+test('update worker rejects a linked ancestor before cleaning up its job',async()=>{
+  const s=sandbox();try{
+    const external=join(s.root,'external'),job=join(s.paths.data,'jobs','example');
+    mkdirSync(join(external,'plugin_data','agy-powertools','jobs','example'),{recursive:true});
+    symlinkSync(external,join(s.paths.root,'antigravity'),process.platform==='win32'?'junction':'dir');
+    await assert.rejects(()=>runUpdateJob({format:1,home:s.home,version:newer.version,asset:{name:'bundle'},job}),/符号链接/);
+    assert.ok(existsSync(job));
+  }finally{s.clean();}
 });
 
 test('verified update installs in a sandbox; bad downloads leave the existing version untouched',async()=>{
