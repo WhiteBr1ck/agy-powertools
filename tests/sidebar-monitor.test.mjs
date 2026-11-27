@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { nativeSource } from '../lib/native-host.mjs';
+import { DEFAULT_SETTINGS } from '../lib/settings.mjs';
 
 const clientSrc = readFileSync(new URL('../lib/native-client.js', import.meta.url), 'utf8');
 const monitorSrc = readFileSync(new URL('../lib/native-sidebar-monitor.js', import.meta.url), 'utf8');
@@ -416,6 +417,47 @@ test('sidebar monitor decorates running rows with flowing beam, hides only 4-dot
   assert.equal(document.head.children.length, 0);
 });
 
+test('companion follows real conversations, distinguishes drag from activation, and restores its layout', () => {
+  const { document } = createMiniDom();
+  let saved = '{invalid', box, items = [], current = 'A', progress = null, calls = 0, subscriptions = 0;
+  const opts = { enabled: true, statusCompanion: DEFAULT_SETTINGS.statusCompanion, language: 'en' }, jumps = [];
+  const ctx = vm.createContext({ document, innerWidth: 400, innerHeight: 300, clearTimeout,
+    localStorage: { getItem: () => saved, setItem: (_, value) => { saved = value; } },
+    React: { createElement: (type,props,...children) => ({type,props,children}), useSyncExternalStore: (_,snap) => snap(),
+      useState: init => [box ??= init(), next => { box = next; }], useRef: current => ({ current }) } });
+  vm.runInContext(monitorSrc, ctx);
+  const monitor = ctx.__agySidebarMonitor({ document, options: () => opts, currentId: () => current, currentProgress: () => progress,
+    adapter: { runningConversations: () => { calls++; return items; }, subscribeStore: () => { subscriptions++; return () => subscriptions--; } },
+    navigateToConversation: (...args) => jumps.push(args), sidebarBeamPreview: () => true });
+  const render = () => { monitor.sync(); return monitor.Companion(); };
+  assert.equal(render(),null); assert.equal(calls,0); assert.equal(subscriptions,0);
+  opts.statusCompanion = true;
+  assert.match(collectText(render()),/Idle/); // The sidebar preview must never masquerade as real activity.
+  items = [{ id:'A', status:'running' }, { id:'B', status:'waiting', title:'Review', projectId:'project' }];
+  progress = { status:'running', phase:'thinking' };
+  const [face,size] = render().children.map(node => node.props);
+  assert.match(face['aria-label'], /Waiting.*Review/);
+  face.onClick({detail:0}); assert.deepEqual(jumps,[['B','project']]);
+  const pointer = { isPrimary:true, button:0, pointerId:1, clientX:25, clientY:30,
+    currentTarget:{ parentElement:{ getBoundingClientRect:() => ({left:20,top:25}) }, setPointerCapture(){} } };
+  face.onPointerDown(pointer); face.onPointerMove({...pointer,clientX:900,clientY:-50}); face.onPointerUp(pointer);
+  face.onLostPointerCapture(); face.onClick({detail:1}); assert.equal(jumps.length,1);
+  assert.deepEqual(JSON.parse(saved),{x:282,y:0,scale:1});
+  face.onKeyDown({...pointer,key:'ArrowLeft',preventDefault(){},stopPropagation(){}});
+  assert.deepEqual(JSON.parse(saved),{x:8,y:25,scale:1});
+  assert.match(size['aria-label'], /size/);
+  render().children[1].props.onClick(); box = undefined;
+  assert.equal(render().props.style['--x'],'8px'); assert.equal(box.scale,1.25);
+  items.pop(); assert.match(collectText(render()),/Thinking/);
+  progress.phase = 'tool'; assert.match(collectText(render()),/Working/);
+  items = []; for (const [status,label] of [['complete','Complete'],['stopped','Stopped'],['error','Error']]) {
+    progress = {status}; assert.match(collectText(render()),new RegExp(label));
+  }
+  current = ''; const idle = render().children[0].props;
+  assert.equal(idle['aria-disabled'],true); idle.onClick({detail:0}); assert.equal(jumps.length,1);
+  opts.statusCompanion = false; assert.equal(render(),null); assert.equal(subscriptions,0); assert.equal(document.head.children.length,0);
+});
+
 test('nativeSource bundles native-sidebar-monitor.js before native-ui.js and native-ui mounts RunningGroup after management nav', () => {
   const bundle = nativeSource('https://127.0.0.1:1234', []);
   const monitorIdx = bundle.indexOf('globalThis.__agySidebarMonitor = createSidebarMonitor');
@@ -434,7 +476,7 @@ test('nativeSource bundles native-sidebar-monitor.js before native-ui.js and nat
     document,
     location: { pathname: '/' },
     AbortController,
-    __agyInitialSettings: { enabled: true, sidebarRunningGroup: true, sidebarRunningBeam: true },
+    __agyInitialSettings: { enabled: true, sidebarRunningGroup: true, sidebarRunningBeam: true, statusCompanion: true },
     React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }), useSyncExternalStore: (_, g) => g(), useState: v => [typeof v === 'function' ? v() : v, () => {}] },
     ReactDOM: {
       createRoot(mount) {
@@ -453,7 +495,9 @@ test('nativeSource bundles native-sidebar-monitor.js before native-ui.js and nat
 
   assert.ok(mountedKinds.includes('management'));
   assert.ok(mountedKinds.includes('sidebar-running-group'));
+  assert.ok(mountedKinds.includes('status-companion'));
   context.__agyPowertools.dispose();
+  assert.ok(!body.children.some(el => el.dataset.agyPowertoolsRoot === 'status-companion'));
 });
 
 test('Settings panel renders sidebar running beam palette, hide-spinner toggle, preview button, and running group toggle without middle dots', () => {
