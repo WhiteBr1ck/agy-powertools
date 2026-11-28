@@ -232,6 +232,20 @@ Mọi thiết lập áp dụng trực tiếp trong **Powertools -> Cài đặt**
 <a id="lich-su-phien-ban"></a>
 ## Lịch sử phiên bản
 
+### v2.17.0
+- **Bổ sung nhóm Cài đặt thứ 6 «Nâng cao» (mọi tính năng AI thử nghiệm đều tắt theo mặc định, tải lười theo nhu cầu với 0 byte khi không dùng)**:
+  - **Dịch quá trình suy nghĩ (Beta)**: Tích hợp sẵn **Google Dịch** (Google Translate) không cần đăng nhập (dự phòng 3 tầng `translateHtml` + `gtx` + Microsoft Edge qua kênh proxy riêng của plugin, dùng ngay không cần cấu hình), đồng thời hỗ trợ chuyển sang dịch trực tuyến (streaming) bằng mô hình AI tùy chỉnh. Chỉ áp dụng nghiêm ngặt trong khối suy nghĩ thu gọn, tự động che bảo vệ khối mã, mã nội tuyến, URL và định danh bằng trình giữ chỗ; hỗ trợ «Chỉ hiển thị bản dịch» hoặc «Song ngữ đối chiếu», tự động dịch lười theo khung nhìn hoặc «Nhấn để dịch», chuyển đổi tức thì «Bản gốc / Đã dịch» căn trái cho từng khối, tự động gộp bộ nhớ đệm toàn khối sau khi stream xong để mở lại không cần tải lại, và tự xóa bộ nhớ đệm cục bộ `0600` 7 ngày khi tắt công tắc.
+  - **Dự đoán ý định trong ô nhập liệu (Beta)**: Tự động tạo gợi ý viết tiếp theo nhu cầu khi phản hồi hoàn tất và ô nhập chính đang trống; với hội thoại cũ đang rảnh chỉ kích hoạt khi chủ động nhấp hoặc dùng phím `Tab` để tiêu điểm vào ô nhập trống (duyệt lịch sử ở thanh bên không tốn API). Nếu chờ quá `160ms` sẽ luân phiên hiển thị nhẹ nhàng các thông điệp vui nhộn theo 10 ngôn ngữ ngay trong dòng, rồi thay placeholder gốc bằng chữ mờ xám nhạt kèm nhãn `Tab` tối giản (nhấn `Tab` chỉ chèn nội dung chứ không tự gửi; xóa trắng ô nhập sẽ khôi phục ngay gợi ý trong bộ nhớ của lượt hiện tại; gõ phím, dán, gõ bộ gõ IME hoặc nhấn `Esc` sẽ hủy ngay lập tức và ngắt yêu cầu đang chạy, hoàn toàn không lưu xuống ổ đĩa).
+  - **«Nhà cung cấp tùy chỉnh» đa giao thức và «Chọn model» thống nhất**: Nâng cấp kênh [proxy.mjs](../lib/proxy.mjs) hỗ trợ POST, JSON và streaming SSE; quản lý nhiều nhà cung cấp độc lập trong tệp cục bộ `0600` riêng biệt `ai-providers.json` (tách khỏi chức năng xuất và nhập cài đặt). Hộp thoại «Thêm nhà cung cấp» / «Chỉnh sửa nhà cung cấp» tái sử dụng bộ chọn phân đoạn của trang Bảng giá để chuyển đổi 4 giao thức **Tương thích OpenAI**, **OpenAI Responses**, **Tương thích Anthropic**, **Tương thích Gemini**, kèm nút con mắt ẩn/hiện khóa API, lấy danh sách mô hình một chạm có ô lọc và chọn nhiều cùng kiểm tra kết nối; bên dưới thống nhất gán **Mô hình mặc định**, **Mô hình dịch suy nghĩ** và **Mô hình dự đoán ý định**.
+- **Tinh giản chỉ báo thanh nhập liệu và cửa sổ nổi Hạn mức tài khoản thanh tiến độ gợn sóng MD3 Expressive (closes #115, closes #116)**:
+  - Trong **Thống kê & Hội thoại** bổ sung **Kiểu chỉ báo thanh nhập liệu** (`Màu ngữ nghĩa` / `Xám dịu`) và **Chỉ hiện biểu tượng** (ẩn các con số nội tuyến theo phong cách thanh đáy tối giản như Codex, nhấn để mở chi tiết đầy đủ cho cả ô nhập chính lẫn Subagent), cùng tùy chọn màu **Đơn sắc** cho **Vòng sáng Quota quanh khung nhập liệu**.
+  - Thêm **Chỉ báo hạn mức trong khung nhập** tùy chọn (tắt mặc định) kèm bộ chọn **Chu kỳ hạn mức** độc lập (`Tự động (mức thấp hơn)` / `Giới hạn 5 giờ` / `Giới hạn tuần`) theo dõi nhóm hạn mức của mô hình đang dùng; nhấn vào sẽ mở cửa sổ nổi **Hạn mức tài khoản** `268px` thiết kế mới, dùng thanh tiến độ gợn sóng **Material 3 Expressive** (đường hoạt động hình sin, khoảng ngắt 4px, đường nền thẳng và chấm cuối) cùng phân cấp cỡ chữ nhóm rõ ràng.
+- **Ghim bảng Tổng quan trong cửa sổ hẹp (closes #114)**: Thêm tùy chọn **Ghim Tổng quan trong cửa sổ hẹp** (tắt mặc định) trong nhóm đổi tên thành **Hiệu ứng & Thanh bên**, cùng nút đinh ghim đơn sắc ngay trên tiêu đề Tổng quan (nét viền khi chưa ghim, tô đặc khi đã ghim), giúp giữ bảng Tổng quan bên phải cố định khi cửa sổ thu hẹp mà vẫn tôn trọng thao tác thu gọn thủ công.
+- **Đồng bộ và hoàn thiện trải nghiệm Cài đặt cùng Tổng quan nhanh**:
+  - **Tổng quan nhanh trên thanh tiêu đề** và trang quản lý ghi nhớ bền vững thẻ và nhóm Cài đặt truy cập lần cuối qua các lần đóng mở lại hoặc chuyển hội thoại;
+  - Nhóm Cài đặt thứ hai đổi tên thành **Hiệu ứng & Thanh bên**, đồng thời chuẩn hóa các nhóm nút tùy chọn không đều (công cụ, chế độ hiển thị và kích hoạt dịch, kiểu chỉ báo, tông vòng sáng, kiểu dải sáng thanh bên) thành danh sách thả xuống gọn gàng;
+  - Bản địa hóa đầy đủ toàn bộ điều khiển mới và 10 thông điệp chờ tải sang đủ 10 ngôn ngữ giao diện kèm bộ kiểm thử tự động toàn diện.
+
 ### v2.16.14
 - **Sửa lỗi hồi quy chuyển đổi tài khoản trên Windows báo `process-list-unavailable` và bỏ qua bước khôi phục thông tin đăng nhập (closes #120)**: Viết lại `listWindowsCredentialWriters()` trong [relaunch-worker.mjs](../scripts/relaunch-worker.mjs) để tránh hết thời gian chờ do quét không giới hạn `tasklist /FI USERNAME`, bằng cách chạy trước lệnh toàn phần tốc độ cao `tasklist /FO CSV /NH`, bỏ qua `PID 0` (`System Idle Process`) không khớp, và chỉ truy vấn thu hẹp theo từng cặp `IMAGENAME + USERNAME` trùng khớp (có hỗ trợ thông báo không tìm thấy bản địa hóa) khi còn tiến trình ghi thông tin đăng nhập.
 - **Sửa lỗi khởi động lại kèm Proxy trên WSL2 và vòng lặp sai lệch trạng thái `not-applied` (closes #113)**: Luôn sao chép `relaunch-worker.mjs` sang thư mục `%TEMP%` của Windows cùng `cwd` tương ứng (tránh treo đường dẫn 9P UNC vượt quá timeout ACK 6 giây), chuyển tiếp và kiểm duyệt danh sách cho phép cho `--wsl-distro=<distro>`, đồng thời trong [relaunch-worker.mjs](../scripts/relaunch-worker.mjs) truyền một chiều và tự động dọn dẹp các biến môi trường proxy, `AGY_POWERTOOLS_PROXY_SPEC` cùng `GODEBUG` qua các mục `WSLENV` `/u` đối với tác vụ WSL2.
@@ -258,6 +272,9 @@ Mọi thiết lập áp dụng trực tiếp trong **Powertools -> Cài đặt**
   - Bổ sung giai đoạn `submitting`, `requestId` đơn điệu và `lastUpdateActionAt` trong `sidecar-ui.mjs` để loại bỏ tranh chấp poll khi cập nhật;
   - Neo chặt đường dẫn gốc bằng `realpathSync.native` chống `TOCTOU` và kiểm tra `assertOwnedPath` trên mọi đường dẫn dọn dẹp/mở khóa trong [lifecycle.mjs](../lib/lifecycle.mjs) và [update-manager.mjs](../lib/update-manager.mjs).
 
+<details>
+<summary>Xem các phiên bản trước (v2.16.7 - v2.16.11)</summary>
+
 ### v2.16.11
 - **Sửa lỗi crash sidecar khi dùng Proxy SOCKS5 và tăng độ ổn định khi khởi động lại kèm Proxy (#93, #64)**: Bỏ `NODE_USE_ENV_PROXY`, chuyển `lib/pricing.mjs` sang `createProxyFetcher()`, nâng timeout ACK trên Windows lên 6 giây và giữ cooldown chặn relaunch qua các chu kỳ poll.
 - **Sửa lỗi lẫn thông tin đăng nhập đa tài khoản và giải mã tiền tố Keyring macOS (#97, #95)**: Thêm `refreshHash` và kiểm tra chống ghi đè chéo, xử lý dọn dẹp `language_server.exe` trước khi khôi phục thông tin đăng nhập, kiểm tra đối chiếu `fromLsAddress` và giải mã tiền tố `go-keyring-base64:` trên macOS.
@@ -281,6 +298,8 @@ Mọi thiết lập áp dụng trực tiếp trong **Powertools -> Cài đặt**
 
 ### v2.16.7
 - **Hỗ trợ đa ngôn ngữ nguyên bản (gồm PR #80 tiếng Pháp)** với kiến trúc tải gói ngôn ngữ theo yêu cầu (`lib/locales/`), tự nhận diện ngôn ngữ hệ điều hành và ghi đè qua `custom-i18n.json`.
+
+</details>
 
 Xem toàn bộ lịch sử phiên bản đầy đủ tại [README_EN.md](../README_EN.md#changelog).
 

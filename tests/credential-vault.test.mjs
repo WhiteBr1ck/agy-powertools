@@ -3,16 +3,25 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ACTIVE_TARGET,
   ACTIVE_USERNAME,
+  SECRET_SERVICE,
+  VAULT_SERVICE,
   buildMacKeychainReadScript,
   buildMacKeychainWriteScript,
   createCredentialVault,
+  deleteSecret,
   extractCredentialEmail,
   extractCredentialMeta,
   extractCredentialRefreshHash,
-  vaultTargetFor
+  readSecret,
+  secretTargetFor,
+  vaultTargetFor,
+  writeSecret
 } from '../lib/credential-vault.mjs';
 
 test('vaultTargetFor validates account IDs and rejects invalid or injection-like names', () => {
@@ -639,3 +648,254 @@ if (process.platform === 'darwin') {
     }
   });
 }
+
+test('secretTargetFor generates deterministic SHA-256 keys under SECRET_SERVICE isolated from account OAuth slots', () => {
+  assert.equal(SECRET_SERVICE, 'agy-powertools-secret');
+  const expectedOpenAi = `agy-powertools-secret:${createHash('sha256').update('ai:openai', 'utf8').digest('hex').slice(0, 32)}`;
+  assert.equal(secretTargetFor('ai:openai'), expectedOpenAi);
+  assert.equal(secretTargetFor('  ai:openai  '), expectedOpenAi);
+  assert.notEqual(secretTargetFor('ai:openai'), secretTargetFor('ai:anthropic'));
+  assert.equal(
+    secretTargetFor('ai:openai', { wslDistro: 'Ubuntu-24.04' }),
+    `agy-powertools-secret:wsl:Ubuntu-24.04:${createHash('sha256').update('ai:openai', 'utf8').digest('hex').slice(0, 32)}`
+  );
+
+  // Even hostile scope keys matching account targets stay strictly isolated under SECRET_SERVICE
+  const hostileActive = secretTargetFor(ACTIVE_TARGET);
+  const hostileAcct = secretTargetFor(vaultTargetFor('acct-1'));
+  assert.ok(hostileActive.startsWith(`${SECRET_SERVICE}:`));
+  assert.notEqual(hostileActive, ACTIVE_TARGET);
+  assert.ok(hostileAcct.startsWith(`${SECRET_SERVICE}:`));
+  assert.notEqual(hostileAcct, vaultTargetFor('acct-1'));
+
+  for (const bad of ['', '   ', null, undefined, 123, 'bad\nkey', 'bad\0key', 'x'.repeat(257)]) {
+    assert.throws(() => secretTargetFor(bad), /凭据标识/);
+  }
+});
+
+test('writeSecret, readSecret, and deleteSecret round-trip across Windows, WSL2, macOS, and Linux without leaking secrets in argv or touching account OAuth slots', () => {
+  // 1. Windows Credential Manager + isolation from account OAuth slots
+  const winStore = new Map([[ACTIVE_TARGET, Buffer.from('{"id_token_email":"oauth@example.com"}').toString('base64')]]);
+  const winCalls = [];
+  const winOpts = {
+    platform: 'win32',
+    runSpawn(cmd, args, opts) {
+      winCalls.push({ cmd, args, env: opts.env, input: opts.input });
+      const op = opts.env.AGY_CRED_OP;
+      if (op === 'write') {
+        winStore.set(opts.env.AGY_CRED_DST, opts.input);
+        return { status: 0, stdout: '{"ok":true,"bytes":16,"hash":"112233445566"}\n', stderr: '' };
+      }
+      if (op === 'read') {
+        const val = winStore.get(opts.env.AGY_CRED_SRC);
+        return {
+          status: 0,
+          stdout: JSON.stringify(val ? { ok: true, exists: true, bytes: 16, hash: '112233445566', data: val } : { ok: true, exists: false, hash: '', data: '' }) + '\n',
+          stderr: ''
+        };
+      }
+      if (op === 'remove') {
+        winStore.delete(opts.env.AGY_CRED_SRC);
+        return { status: 0, stdout: '{"ok":true}\n', stderr: '' };
+      }
+      if (op === 'has' || op === 'inspect') {
+        const val = winStore.get(opts.env.AGY_CRED_SRC);
+        return { status: 0, stdout: JSON.stringify({ ok: true, exists: Boolean(val), hash: val ? 'AABBCCDDEEFF' : '' }) + '\n', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    }
+  };
+  assert.deepEqual(readSecret('ai:openai', winOpts), { ok: true, exists: false, value: '', available: true, reason: '' });
+  assert.deepEqual(writeSecret('ai:openai', 'sk-win-secret-999', winOpts), { ok: true, available: true, reason: '' });
+  assert.equal(winCalls.at(-1).args.join(' ').includes('sk-win-secret-999'), false);
+  assert.equal(winCalls.at(-1).env.AGY_CRED_DST, secretTargetFor('ai:openai'));
+  assert.deepEqual(readSecret('ai:openai', winOpts), { ok: true, exists: true, value: 'sk-win-secret-999', available: true, reason: '' });
+  assert.deepEqual(deleteSecret('ai:openai', winOpts), { ok: true, available: true, reason: '' });
+  assert.deepEqual(readSecret('ai:openai', winOpts), { ok: true, exists: false, value: '', available: true, reason: '' });
+  // Account OAuth slot remained completely untouched
+  assert.equal(winStore.has(ACTIVE_TARGET), true);
+  assert.equal(createCredentialVault(winOpts).has(ACTIVE_TARGET), true);
+
+  // 2. WSL2 hybrid Win32 CredMan
+  const wslStore = new Map();
+  const wslOpts = {
+    platform: 'linux',
+    wsl: true,
+    env: { WSL_DISTRO_NAME: 'Ubuntu-24.04' },
+    runSpawn(_cmd, _args, opts) {
+      const op = opts.env.AGY_CRED_OP;
+      assert.ok(opts.env.WSLENV.includes('AGY_CRED_OP'));
+      if (op === 'write') {
+        wslStore.set(opts.env.AGY_CRED_DST, opts.input);
+        return { status: 0, stdout: '{"ok":true,"bytes":12,"hash":"AABBCCDDEEFF"}\n', stderr: '' };
+      }
+      if (op === 'read') {
+        const val = wslStore.get(opts.env.AGY_CRED_SRC);
+        return { status: 0, stdout: JSON.stringify({ ok: true, exists: Boolean(val), data: val || '' }) + '\n', stderr: '' };
+      }
+      if (op === 'remove') {
+        wslStore.delete(opts.env.AGY_CRED_SRC);
+        return { status: 0, stdout: '{"ok":true}\n', stderr: '' };
+      }
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    }
+  };
+  assert.equal(writeSecret('translate:azure', 'az-wsl-key', wslOpts).ok, true);
+  assert.equal(wslStore.has(secretTargetFor('translate:azure', { wslDistro: 'Ubuntu-24.04' })), true);
+  assert.equal(readSecret('translate:azure', wslOpts).value, 'az-wsl-key');
+  assert.equal(deleteSecret('translate:azure', wslOpts).ok, true);
+  assert.equal(readSecret('translate:azure', wslOpts).value, '');
+
+  // 3. macOS Keychain (distinct service = SECRET_SERVICE, never touches VAULT_SERVICE)
+  const macStore = new Map([[`${VAULT_SERVICE}\0acct-1`, 'oauth-account-token']]);
+  const macCalls = [];
+  const macOpts = {
+    platform: 'darwin',
+    runSpawn(cmd, args, opts) {
+      macCalls.push({ cmd, args, input: opts?.input });
+      if (cmd === '/usr/bin/security' && args[0] === 'find-generic-password') {
+        const svc = args[args.indexOf('-s') + 1];
+        const acct = args[args.indexOf('-a') + 1];
+        const val = macStore.get(`${svc}\0${acct}`);
+        if (val == null) return { status: 44, stdout: '', stderr: 'not found' };
+        return { status: 0, stdout: Buffer.from(val + '\n', 'utf8') };
+      }
+      if (cmd === '/usr/bin/security' && args[0] === '-i') {
+        const line = String(opts?.input || '');
+        const hexM = line.match(/^add-generic-password -U -s ("[^"]+") -a ("[^"]+") -X ([0-9a-f]+)\n$/i);
+        assert.ok(hexM, 'expected -X hex write for short secret');
+        macStore.set(`${JSON.parse(hexM[1])}\0${JSON.parse(hexM[2])}`, Buffer.from(hexM[3], 'hex').toString('utf8'));
+        return { status: 0, stdout: '' };
+      }
+      if (cmd === '/usr/bin/security' && args[0] === 'delete-generic-password') {
+        const svc = args[args.indexOf('-s') + 1];
+        const acct = args[args.indexOf('-a') + 1];
+        macStore.delete(`${svc}\0${acct}`);
+        return { status: 0, stdout: '' };
+      }
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    }
+  };
+  assert.equal(writeSecret('ai:gemini', 'AIza-mac-key', macOpts).ok, true);
+  assert.equal(macCalls.at(-1).args.join(' ').includes('AIza-mac-key'), false);
+  const macKeyHash = secretTargetFor('ai:gemini').slice(`${SECRET_SERVICE}:`.length);
+  assert.equal(macStore.get(`${SECRET_SERVICE}\0${macKeyHash}`), 'AIza-mac-key');
+  assert.equal(readSecret('ai:gemini', macOpts).value, 'AIza-mac-key');
+  assert.equal(deleteSecret('ai:gemini', macOpts).ok, true);
+  assert.equal(readSecret('ai:gemini', macOpts).value, '');
+  assert.equal(macStore.get(`${VAULT_SERVICE}\0acct-1`), 'oauth-account-token');
+
+  // 4. Linux secret-tool (requires desktop keyring env, passes secret via stdin, uses SECRET_SERVICE)
+  const linuxStore = new Map([[`${VAULT_SERVICE}\0acct-1`, 'linux-oauth-token']]);
+  const linuxCalls = [];
+  const linuxOpts = {
+    platform: 'linux',
+    wsl: false,
+    env: { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' },
+    runSpawn(cmd, args, opts) {
+      linuxCalls.push({ cmd, args, input: opts?.input ? Buffer.from(opts.input).toString('utf8') : '' });
+      const svc = args[args.indexOf('service') + 1];
+      const acct = args[args.indexOf('username') + 1];
+      if (args[0] === 'store') {
+        linuxStore.set(`${svc}\0${acct}`, Buffer.from(opts.input).toString('utf8'));
+        return { status: 0, stdout: '' };
+      }
+      if (args[0] === 'lookup') {
+        const val = linuxStore.get(`${svc}\0${acct}`);
+        if (val == null) return { status: 1, stdout: '', stderr: '' };
+        return { status: 0, stdout: Buffer.from(val, 'utf8') };
+      }
+      if (args[0] === 'clear') {
+        linuxStore.delete(`${svc}\0${acct}`);
+        return { status: 0, stdout: '' };
+      }
+      return { status: 1, stdout: '', stderr: 'unexpected' };
+    }
+  };
+  assert.equal(writeSecret('ai:anthropic', 'sk-ant-linux-1', linuxOpts).ok, true);
+  assert.equal(linuxCalls.at(-1).args.includes('sk-ant-linux-1'), false);
+  assert.equal(linuxCalls.at(-1).args[linuxCalls.at(-1).args.indexOf('service') + 1], SECRET_SERVICE);
+  assert.equal(readSecret('ai:anthropic', linuxOpts).value, 'sk-ant-linux-1');
+  assert.equal(deleteSecret('ai:anthropic', linuxOpts).ok, true);
+  assert.equal(readSecret('ai:anthropic', linuxOpts).value, '');
+  assert.equal(linuxStore.get(`${VAULT_SERVICE}\0acct-1`), 'linux-oauth-token');
+});
+
+test('generic secret vault fails closed with vault-unavailable across OS backends and never writes plaintext files to disk', () => {
+  const scratchHome = mkdtempSync(join(tmpdir(), 'agy-secret-failclosed-'));
+  try {
+    // 1. Unsupported platform
+    const unsupWrite = writeSecret('ai:openai', 'sk-never-disk', { platform: 'freebsd', home: scratchHome });
+    assert.equal(unsupWrite.ok, false);
+    assert.equal(unsupWrite.available, false);
+    assert.equal(unsupWrite.reason, 'vault-unavailable');
+    const unsupRead = readSecret('ai:openai', { platform: 'freebsd', home: scratchHome });
+    assert.equal(unsupRead.ok, false);
+    assert.equal(unsupRead.available, false);
+    assert.equal(unsupRead.reason, 'vault-unavailable');
+    assert.equal(unsupRead.value, '');
+
+    // 2. Headless Linux without D-Bus / DISPLAY / WAYLAND_DISPLAY
+    let spawnCalled = false;
+    const headlessOpts = {
+      platform: 'linux',
+      wsl: false,
+      home: scratchHome,
+      env: {},
+      runSpawn() { spawnCalled = true; return { status: 0 }; }
+    };
+    const headlessWrite = writeSecret('ai:openai', 'sk-never-disk', headlessOpts);
+    assert.equal(headlessWrite.ok, false);
+    assert.equal(headlessWrite.available, false);
+    assert.equal(headlessWrite.reason, 'vault-unavailable');
+    assert.equal(spawnCalled, false);
+
+    // 3. Linux without secret-tool (ENOENT)
+    const noToolOpts = {
+      platform: 'linux',
+      wsl: false,
+      home: scratchHome,
+      env: { DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' },
+      runSpawn: () => ({ status: null, error: Object.assign(new Error('spawn secret-tool ENOENT'), { code: 'ENOENT' }) })
+    };
+    assert.equal(writeSecret('ai:openai', 'sk-never-disk', noToolOpts).reason, 'vault-unavailable');
+    assert.equal(readSecret('ai:openai', noToolOpts).reason, 'vault-unavailable');
+    assert.equal(deleteSecret('ai:openai', noToolOpts).reason, 'vault-unavailable');
+
+    // 4. macOS locked keychain (-25308 / interaction not allowed)
+    const lockedMacOpts = {
+      platform: 'darwin',
+      home: scratchHome,
+      runSpawn: () => ({ status: 36, stdout: '', stderr: 'security: SecKeychainItemCopyContent: User interaction is not allowed. (-25308)' })
+    };
+    const macWrite = writeSecret('ai:openai', 'sk-never-disk', lockedMacOpts);
+    assert.equal(macWrite.ok, false);
+    assert.equal(macWrite.available, false);
+    assert.equal(macWrite.reason, 'vault-unavailable');
+    const macRead = readSecret('ai:openai', lockedMacOpts);
+    assert.equal(macRead.ok, false);
+    assert.equal(macRead.available, false);
+    assert.equal(macRead.reason, 'vault-unavailable');
+
+    // 5. Windows / WSL2 with powershell.exe unavailable (ENOENT)
+    const noPsOpts = {
+      platform: 'win32',
+      home: scratchHome,
+      runSpawn: () => ({ status: null, stdout: '', stderr: '', error: Object.assign(new Error('spawn powershell.exe ENOENT'), { code: 'ENOENT' }) })
+    };
+    assert.equal(writeSecret('ai:openai', 'sk-never-disk', noPsOpts).reason, 'vault-unavailable');
+    assert.equal(readSecret('ai:openai', noPsOpts).reason, 'vault-unavailable');
+    assert.equal(deleteSecret('ai:openai', noPsOpts).reason, 'vault-unavailable');
+
+    // 6. Validation errors (empty secret, invalid scope)
+    const validOpts = { platform: 'win32', runSpawn: () => ({ status: 0, stdout: '{"ok":true}\n', stderr: '' }) };
+    assert.equal(writeSecret('ai:openai', '', validOpts).reason, 'invalid-value');
+    assert.equal(readSecret('', validOpts).reason, 'invalid-scope');
+    assert.equal(deleteSecret('bad\nscope', validOpts).reason, 'invalid-scope');
+
+    // 7. Zero plaintext files created on disk in home directory!
+    assert.deepEqual(readdirSync(scratchHome), []);
+  } finally {
+    rmSync(scratchHome, { recursive: true, force: true });
+  }
+});

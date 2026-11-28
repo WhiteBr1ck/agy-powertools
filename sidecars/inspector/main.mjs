@@ -89,6 +89,7 @@ if (isDirectRun) {
   }
   const stop = startNativeIntegration({
     parseSessionData,
+    dataDir: paths.data,
     fxStore,
     home: paths.home,
     onDebugPortReady() {
@@ -167,7 +168,9 @@ if (isDirectRun) {
       return verifyRelaunchStarted(scheduled, { dataDir: paths.data });
     },
     onSetSettings: patch => {
+      const prev = settings.get();
       const next = settings.set(patch);
+      if (prev.betaThinkingTranslate && !next.betaThinkingTranslate) stop.purgeTranslateCache?.();
       if (next.currency === 'CNY') void fxStore.refresh().catch(() => {});
       return next;
     },

@@ -8,6 +8,8 @@ import {
   checkProxyPortOpen,
   chromiumProxyArgs,
   createProxyFetcher,
+  httpsGetThroughProxy,
+  httpsRequestThroughProxy,
   inspectProxyRuntime,
   isValidProxyBypass,
   isValidProxyUrl,
@@ -15,7 +17,9 @@ import {
   normalizeProxyBypass,
   normalizeProxyUrl,
   probeProxyConnectivity,
-  proxySpecFromSettings
+  proxySpecFromSettings,
+  resolveEffectiveProxyConfig,
+  shouldBypassProxy
 } from '../lib/proxy.mjs';
 
 function listenTcp(onConnection) {
@@ -208,7 +212,9 @@ test('probeProxyConnectivity verifies HTTP CONNECT, HTTP 407, SOCKS5 handshake, 
   }
 });
 
-function createSelfSignedCert(hostname) {
+function createSelfSignedCert(hostnames) {
+  const names = Array.isArray(hostnames) ? hostnames : [hostnames];
+  const primary = names[0];
   const derLen = len => {
     if (len < 0x80) return Buffer.from([len]);
     const bytes = [];
@@ -246,12 +252,12 @@ function createSelfSignedCert(hostname) {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const spki = publicKey.export({ type: 'spki', format: 'der' });
   const sigAlg = derSeq(derOid('1.2.840.10045.4.3.2')); // ecdsa-with-SHA256
-  const name = derSeq(derSet(derSeq(derOid('2.5.4.3'), derTag(0x0c, Buffer.from(hostname, 'utf8')))));
+  const name = derSeq(derSet(derSeq(derOid('2.5.4.3'), derTag(0x0c, Buffer.from(primary, 'utf8')))));
   const now = Date.now();
   const validity = derSeq(derUtcTime(new Date(now - 86_400_000)), derUtcTime(new Date(now + 86_400_000)));
   const sanExt = derSeq(
     derOid('2.5.29.17'),
-    derTag(0x04, derSeq(derTag(0x82, Buffer.from(hostname, 'ascii'))))
+    derTag(0x04, derSeq(...names.map(h => derTag(0x82, Buffer.from(h, 'ascii')))))
   );
   const extensions = derTag(0xa3, derSeq(sanExt));
   const tbs = derSeq(
@@ -503,6 +509,396 @@ test('createProxyFetcher tunnels HTTPS requests through HTTP CONNECT and SOCKS5 
     for (const timer of slowTimers) clearInterval(timer);
     await httpProxy.close();
     await socksProxy.close();
+    await httpsServer.close();
+  }
+});
+
+test('shouldBypassProxy matches loopback, CIDR ranges, domain suffixes/wildcards, exact hosts, and handles empty inputs', () => {
+  // Loopback is always bypassed even when bypassCsv is empty or omitted
+  for (const loopbackUrl of [
+    'http://localhost:11434/api/chat',
+    'https://localhost/v1/models',
+    'http://127.0.0.1:11434/api/generate',
+    'http://[::1]:11434/api/tags',
+    'http://ollama.localhost:8080/v1'
+  ]) {
+    assert.equal(shouldBypassProxy(loopbackUrl, ''), true, `loopback must bypass: ${loopbackUrl}`);
+    assert.equal(shouldBypassProxy(loopbackUrl, undefined), true, `loopback must bypass with default: ${loopbackUrl}`);
+    assert.equal(shouldBypassProxy(loopbackUrl, null), true, `loopback must bypass with null: ${loopbackUrl}`);
+  }
+
+  // Empty bypass does not bypass public hosts
+  assert.equal(shouldBypassProxy('https://api.openai.com/v1/chat/completions', ''), false);
+  assert.equal(shouldBypassProxy('https://api.openai.com/v1/chat/completions', null), false);
+  assert.equal(shouldBypassProxy('not-a-valid-url', '*'), false);
+
+  // Wildcard and leading-dot domain suffixes
+  const domainRules = '*.internal, .corp.local; exact.lan, port-only.lan:11434';
+  assert.equal(shouldBypassProxy('https://api.internal/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://a.b.internal/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://internal/v1', domainRules), false);
+  assert.equal(shouldBypassProxy('https://notinternal/v1', domainRules), false);
+
+  assert.equal(shouldBypassProxy('https://svc.corp.local/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://deep.svc.corp.local/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://corp.local/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://evilcorp.local/v1', domainRules), false);
+
+  // Exact host and port-scoped host
+  assert.equal(shouldBypassProxy('https://exact.lan/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://sub.exact.lan/v1', domainRules), false);
+  assert.equal(shouldBypassProxy('https://port-only.lan:11434/v1', domainRules), true);
+  assert.equal(shouldBypassProxy('https://port-only.lan:8443/v1', domainRules), false);
+
+  // IPv4 CIDR ranges
+  const cidrRules = '10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12';
+  assert.equal(shouldBypassProxy('https://10.0.0.1/v1', cidrRules), true);
+  assert.equal(shouldBypassProxy('https://10.255.255.254/v1', cidrRules), true);
+  assert.equal(shouldBypassProxy('https://11.0.0.1/v1', cidrRules), false);
+
+  assert.equal(shouldBypassProxy('https://192.168.1.42:8443/v1', cidrRules), true);
+  assert.equal(shouldBypassProxy('https://192.169.1.42/v1', cidrRules), false);
+
+  assert.equal(shouldBypassProxy('https://172.16.0.1/v1', cidrRules), true);
+  assert.equal(shouldBypassProxy('https://172.31.255.254/v1', cidrRules), true);
+  assert.equal(shouldBypassProxy('https://172.15.255.255/v1', cidrRules), false);
+  assert.equal(shouldBypassProxy('https://172.32.0.1/v1', cidrRules), false);
+
+  // Malformed CIDR must fail closed (never act as /0)
+  assert.equal(shouldBypassProxy('https://8.8.8.8/', '10.0.0.0/, 10.0.0.0/33, 10..0.1/8'), false);
+  assert.equal(shouldBypassProxy('https://any.example.com/', '*'), true);
+});
+
+test('httpsRequestThroughProxy supports POST JSON, Fetch headers/arrayBuffer, SSE streaming, AbortSignal, cross-origin header stripping, and strictProxy', async () => {
+  const hostA = 'origin-a.test';
+  const hostB = 'origin-b.test';
+  const { key, cert } = createSelfSignedCert([hostA, hostB]);
+  const received = [];
+  const sseTimers = new Set();
+
+  const httpsServer = await listenHttps({ key, cert }, (req, res) => {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => {
+      const rawBody = Buffer.concat(chunks).toString('utf8');
+      received.push({
+        method: req.method,
+        host: req.headers.host,
+        url: req.url,
+        headers: { ...req.headers },
+        body: rawBody
+      });
+
+      if (req.url === '/api/chat' && req.method === 'POST') {
+        const parsed = JSON.parse(rawBody);
+        res.writeHead(200, 'OK', {
+          'Content-Type': 'application/json; charset=utf-8',
+          'X-Request-Id': 'req-42'
+        });
+        res.end(JSON.stringify({
+          echo: parsed.prompt,
+          contentLength: req.headers['content-length'],
+          auth: req.headers.authorization || ''
+        }));
+        return;
+      }
+
+      if (req.url === '/api/binary' && req.method === 'PUT') {
+        res.writeHead(200, 'OK', { 'Content-Type': 'application/octet-stream' });
+        res.end(Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+        return;
+      }
+
+      if (req.url === '/api/sse') {
+        res.writeHead(200, 'OK', {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache'
+        });
+        res.write('data: {"delta":"你"}\n\n');
+        const t1 = setTimeout(() => {
+          if (!res.destroyed && !res.writableEnded) res.write('data: {"delta":"好"}\n\n');
+        }, 25);
+        const t2 = setTimeout(() => {
+          if (!res.destroyed && !res.writableEnded) {
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
+        }, 55);
+        sseTimers.add(t1);
+        sseTimers.add(t2);
+        return;
+      }
+
+      if (req.url === '/api/sse-abort') {
+        res.writeHead(200, 'OK', { 'Content-Type': 'text/event-stream' });
+        res.write('data: first\n\n');
+        const iv = setInterval(() => {
+          if (!res.destroyed && !res.writableEnded) res.write('data: keepalive\n\n');
+        }, 500);
+        sseTimers.add(iv);
+        res.once('close', () => clearInterval(iv));
+        return;
+      }
+
+      if (req.url === '/redirect-cross-origin') {
+        res.writeHead(302, { Location: `https://${hostB}/landing` });
+        res.end();
+        return;
+      }
+
+      if (req.url === '/redirect-same-origin') {
+        res.writeHead(302, { Location: `https://${hostA}/landing` });
+        res.end();
+        return;
+      }
+
+      if (req.url === '/landing') {
+        res.writeHead(200, 'OK', { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          method: req.method,
+          host: req.headers.host,
+          authorization: req.headers.authorization || null,
+          xGoogApiKey: req.headers['x-goog-api-key'] || null,
+          ocpKey: req.headers['ocp-apim-subscription-key'] || null,
+          cookie: req.headers.cookie || null,
+          traceId: req.headers['x-trace-id'] || null,
+          body: rawBody
+        }));
+        return;
+      }
+
+      res.writeHead(200, 'OK', { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, method: req.method }));
+    });
+  });
+
+  const connectTargets = [];
+  const httpProxy = await listenTcp(clientSocket => {
+    let buf = Buffer.alloc(0);
+    const onData = chunk => {
+      buf = Buffer.concat([buf, chunk]);
+      const endIdx = buf.indexOf('\r\n\r\n');
+      if (endIdx === -1) return;
+      clientSocket.off('data', onData);
+      const firstLine = buf.subarray(0, buf.indexOf('\r\n')).toString('latin1');
+      const match = firstLine.match(/^CONNECT\s+([^\s]+)\s+HTTP/i);
+      if (!match) {
+        clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+        return;
+      }
+      connectTargets.push(match[1]);
+      const leftover = buf.subarray(endIdx + 4);
+      const upstream = net.connect(httpsServer.port, '127.0.0.1', () => {
+        clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (leftover.length) upstream.write(leftover);
+        clientSocket.pipe(upstream);
+        upstream.pipe(clientSocket);
+      });
+      upstream.on('error', () => clientSocket.destroy());
+      clientSocket.on('error', () => upstream.destroy());
+      upstream.on('close', () => clientSocket.destroy());
+      clientSocket.on('close', () => upstream.destroy());
+    };
+    clientSocket.on('data', onData);
+  });
+
+  // Closed proxy port to test strictProxy fail-closed vs legacy fallback
+  const deadProxy = await listenTcp(() => {});
+  const deadPort = deadProxy.port;
+  await deadProxy.close();
+
+  const proxyUrl = `http://127.0.0.1:${httpProxy.port}`;
+
+  try {
+    // 1. POST JSON body with UTF-8 multi-byte characters, .json(), .headers.get(), plain header access, statusText
+    const payload = JSON.stringify({ prompt: '翻译这段中文文本' });
+    const postRes = await httpsRequestThroughProxy(`https://${hostA}/api/chat`, proxyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer sk-proxy-test'
+      },
+      body: payload,
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    assert.equal(postRes.ok, true);
+    assert.equal(postRes.status, 200);
+    assert.equal(postRes.statusText, 'OK');
+    assert.equal(postRes.headers.get('X-Request-Id'), 'req-42');
+    assert.equal(postRes.headers.get('x-request-id'), 'req-42');
+    assert.equal(postRes.headers.get('x-missing'), null);
+    assert.equal(postRes.headers['x-request-id'], 'req-42');
+    assert.equal(postRes.headers.has('Content-Type'), true);
+    const postJson = await postRes.json();
+    assert.equal(postJson.echo, '翻译这段中文文本');
+    assert.equal(postJson.contentLength, String(Buffer.byteLength(payload, 'utf8')));
+    assert.equal(postJson.auth, 'Bearer sk-proxy-test');
+
+    // 2. PUT Uint8Array body + .arrayBuffer() + httpsGetThroughProxy alias
+    const putRes = await httpsRequestThroughProxy(`https://${hostA}/api/binary`, proxyUrl, {
+      method: 'PUT',
+      body: new Uint8Array([1, 2, 3, 4]),
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    const ab = await putRes.arrayBuffer();
+    assert.deepEqual(Array.from(new Uint8Array(ab)), [0xde, 0xad, 0xbe, 0xef]);
+
+    const aliasRes = await httpsGetThroughProxy(`https://${hostA}/ping`, proxyUrl, {
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    assert.deepEqual(await aliasRes.json(), { ok: true, method: 'GET' });
+
+    // 3. SSE streaming over HTTP CONNECT proxy using Web ReadableStream getReader()
+    const sseRes1 = await httpsRequestThroughProxy(`https://${hostA}/api/sse`, proxyUrl, {
+      method: 'POST',
+      headers: { Accept: 'text/event-stream' },
+      body: JSON.stringify({ stream: true }),
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    assert.equal(sseRes1.ok, true);
+    assert.equal(typeof sseRes1.body.getReader, 'function');
+    const reader = sseRes1.body.getReader();
+    const decoder = new TextDecoder();
+    const sseChunks1 = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      sseChunks1.push(decoder.decode(value, { stream: true }));
+    }
+    assert.ok(sseChunks1.length >= 2, 'SSE chunks should arrive incrementally via getReader()');
+    assert.equal(sseChunks1.join(''), 'data: {"delta":"你"}\n\ndata: {"delta":"好"}\n\ndata: [DONE]\n\n');
+
+    // 4. SSE streaming using for-await async iteration
+    const sseRes2 = await httpsRequestThroughProxy(`https://${hostA}/api/sse`, proxyUrl, {
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    let sseCombined = '';
+    for await (const chunk of sseRes2.body) {
+      sseCombined += Buffer.from(chunk).toString('utf8');
+    }
+    assert.equal(sseCombined, 'data: {"delta":"你"}\n\ndata: {"delta":"好"}\n\ndata: [DONE]\n\n');
+
+    // 5. AbortSignal interrupts getReader() SSE stream promptly
+    const sseAc = new AbortController();
+    const abortSseRes = await httpsRequestThroughProxy(`https://${hostA}/api/sse-abort`, proxyUrl, {
+      signal: sseAc.signal,
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    const abortReader = abortSseRes.body.getReader();
+    const firstRead = await abortReader.read();
+    assert.equal(Buffer.from(firstRead.value).toString('utf8'), 'data: first\n\n');
+    sseAc.abort(new Error('sse aborted by user'));
+    await assert.rejects(() => abortReader.read(), /sse aborted by user/);
+    assert.equal(abortSseRes.body.destroyed, true);
+
+    // 6. Cross-origin redirect strips Authorization, X-Goog-API-Key, Ocp-Apim-Subscription-Key, Cookie; downgrades POST->GET
+    const crossRes = await httpsRequestThroughProxy(`https://${hostA}/redirect-cross-origin`, proxyUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer top-secret',
+        'X-Goog-API-Key': 'goog-secret',
+        'Ocp-Apim-Subscription-Key': 'azure-secret',
+        Cookie: 'session=abc',
+        'X-Trace-Id': 'trace-123'
+      },
+      body: '{"secret":true}',
+      redirect: 'follow',
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    assert.equal(crossRes.url, `https://${hostB}/landing`);
+    const crossData = await crossRes.json();
+    assert.equal(crossData.method, 'GET');
+    assert.equal(crossData.authorization, null);
+    assert.equal(crossData.xGoogApiKey, null);
+    assert.equal(crossData.ocpKey, null);
+    assert.equal(crossData.cookie, null);
+    assert.equal(crossData.traceId, 'trace-123');
+    assert.equal(crossData.body, '');
+
+    // 7. Same-origin redirect preserves Authorization
+    const sameRes = await httpsRequestThroughProxy(`https://${hostA}/redirect-same-origin`, proxyUrl, {
+      headers: {
+        Authorization: 'Bearer same-origin-token',
+        'X-Trace-Id': 'trace-456'
+      },
+      redirect: 'follow',
+      tlsOptions: { ca: cert },
+      timeoutMs: 5000
+    });
+    const sameData = await sameRes.json();
+    assert.equal(sameData.authorization, 'Bearer same-origin-token');
+    assert.equal(sameData.traceId, 'trace-456');
+
+    // 8. createProxyFetcher respects shouldBypassProxy (localhost / *.internal skip proxy -> direct fallback)
+    const directCalls = [];
+    const mockFallback = async (url, opts) => {
+      directCalls.push({ url, method: opts?.method || 'GET' });
+      return { ok: true, status: 200, async json() { return { direct: true }; } };
+    };
+    const bypassEnv = {
+      HTTPS_PROXY: proxyUrl,
+      NO_PROXY: 'localhost,127.0.0.1,::1,*.internal,10.0.0.0/8'
+    };
+    const cfg = resolveEffectiveProxyConfig({ home: '/nonexistent-home', env: bypassEnv });
+    assert.equal(cfg.proxyUrl, proxyUrl);
+    const fetcherWithBypass = createProxyFetcher({
+      home: '/nonexistent-home',
+      env: bypassEnv,
+      fallback: mockFallback,
+      tlsOptions: { ca: cert },
+      strictProxy: true
+    });
+    const prevConnectCount = connectTargets.length;
+    await fetcherWithBypass('http://127.0.0.1:11434/api/chat', { method: 'POST', body: '{}' });
+    await fetcherWithBypass('https://localhost:8443/api/chat', { method: 'POST', body: '{}' });
+    await fetcherWithBypass('https://ollama.internal/v1/models');
+    await fetcherWithBypass('https://10.1.2.3/v1/models');
+    assert.equal(connectTargets.length, prevConnectCount, 'bypassed URLs must never hit proxy');
+    assert.equal(directCalls.length, 4);
+
+    // 9. strictProxy: true fails closed when configured proxy fails (never leaks to direct fallback!)
+    let strictFallbackHits = 0;
+    const strictFetcher = createProxyFetcher({
+      home: '/nonexistent-home',
+      env: { HTTPS_PROXY: `http://127.0.0.1:${deadPort}` },
+      fallback: async () => {
+        strictFallbackHits++;
+        return { ok: true, status: 200, async text() { return 'leaked'; } };
+      },
+      strictProxy: true
+    });
+    await assert.rejects(
+      () => strictFetcher(`https://${hostA}/api/chat`, { method: 'POST', body: '{}', timeoutMs: 1500 }),
+      /ECONNREFUSED|connect|代理|timeout/i
+    );
+    assert.equal(strictFallbackHits, 0, 'strictProxy: true must NEVER fall back to direct fetch');
+
+    // 10. Default strictProxy: false still falls back to direct fetch when proxy is unreachable
+    let legacyFallbackHits = 0;
+    const legacyFetcher = createProxyFetcher({
+      home: '/nonexistent-home',
+      env: { HTTPS_PROXY: `http://127.0.0.1:${deadPort}` },
+      fallback: async () => {
+        legacyFallbackHits++;
+        return { ok: true, status: 200, async text() { return 'fallback-ok'; } };
+      }
+    });
+    const fallbackRes = await legacyFetcher(`https://${hostA}/api/chat`, { timeoutMs: 1500 });
+    assert.equal(legacyFallbackHits, 1);
+    assert.equal(await fallbackRes.text(), 'fallback-ok');
+  } finally {
+    for (const timer of sseTimers) {
+      clearTimeout(timer);
+      clearInterval(timer);
+    }
+    await httpProxy.close();
     await httpsServer.close();
   }
 });

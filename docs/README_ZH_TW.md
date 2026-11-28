@@ -227,6 +227,20 @@ sh ./install.sh
 
 ## 更新日誌
 
+### v2.17.0
+- **新增設定頁第 6 分組「進階功能」（實驗性 AI 能力預設全部關閉，零位元組按需延遲載入）**：
+  - **思維過程翻譯（Beta）**：預設內建免登入 **Google 翻譯**（Google Translate，`translateHtml` + `gtx` + 微軟 Edge 三級備援，複用外掛獨立代理通道，無需設定即可開箱使用），亦可切換為自訂 AI 模型串流翻譯；嚴格限定僅作用於思考過程折疊區塊，自動佔位保護程式碼區塊、行內程式碼、URL 與識別碼；支援僅顯示譯文 / 雙語對照、自動視埠延遲載入 / 手動點擊、單區塊左對齊「原文 / 譯文」即時切換、串流完成後自動合併整塊快取實現二次點開零重新載入，以及關閉開關自動清除本機 `0600` 7 天快取。
+  - **輸入框意圖預測（Beta）**：回覆完成且主輸入框為空時自動按需產生下一步續寫建議，切換至歷史空閒對話僅在主動點擊或鍵盤 `Tab` 聚焦空輸入框時按需觸發（側邊欄翻看歷史零消耗）；產生等待超過 `160ms` 會在行內輪播柔和呼吸的 10 語種俏皮提示，就緒後直接以淺灰字與極簡 `Tab` 標記替換原生佔位符（按 `Tab` 僅填入絕不自動傳送，刪回空輸入框立刻從記憶體恢復本輪建議，打字/貼上/輸入法組字/按 `Esc` 立即取消並中止在途請求，零磁碟持久化）。
+  - **多協定「自訂供應商」與統一「模型分配」**：升級底層代理通道 [proxy.mjs](../lib/proxy.mjs) 支援 POST/JSON/SSE 串流傳輸；支援獨立管理多個自訂供應商（存於獨立 `0600` 本機檔案 `ai-providers.json`，不隨設定匯出匯入），彈窗複用價格頁同款分段控制項切換 **OpenAI 相容**、**OpenAI Responses**、**Anthropic 相容**、**Gemini 相容** 四大協定，內建 API 金鑰明文/密文切換眼睛按鈕、一鍵拉取並搜尋勾選模型與連通性測試，並在下方統一為預設模型、思考翻譯與意圖預測分配模型。
+- **輸入框底欄指標靜謐化與 MD3 波浪進度條帳號額度浮動視窗（closes #115，closes #116）**：
+  - 「統計與增強」新增 **底欄指標樣式**（`語義彩色` / `靜謐灰`）與 **僅顯示圖示**（隱藏行內數字，類似 Codex 極簡底欄，點擊展開完整明細），同步覆蓋主輸入框與子智能體輸入框；「輸入框額度光環」新增 **靜謐單色** 配色選項。
+  - 新增可選 **輸入框額度指示器**（預設關閉）及獨立 **額度週期** 選擇（`自動（較低項）` / `5 小時限額` / `週限額`），追蹤目前模型所屬額度池；點擊展開全新重構的 `268px` 緊湊「帳號額度」浮動視窗，採用 **Material 3 Expressive 波浪進度條**（正弦波浪活躍軌、4px 斷口、直線底軌與終點圓點）與清晰的分組字號層級。
+- **窄視窗固定右側概覽面板（closes #114）**：在更名後的 **「動效與側欄」** 分組新增「窄視窗固定概覽面板」（預設關閉），並在概覽標題列內建原生風格單色圖釘按鈕（未固定描邊、固定後純色實心無底框）；開啟後在窄視窗下自動保持右側概覽側停不收起，同時尊重手動折疊。
+- **設定與快捷浮動視窗體驗統一打磨**：
+  - 右上角「標題列快捷概覽」與管理頁支援持久化記憶上次存取的分頁與設定子分組，關閉重開或切換會話後直接回到上次位置；
+  - 設定頁第二分組更名為 **「動效與側欄」**，並將翻譯引擎/顯示/觸發方式、底欄指標樣式、光環配色與側邊欄流光樣式等選項按鈕統一收斂為齊整的下拉選擇器；
+  - 全部新功能與 10 條載入提示完整同步 10 種介面語言，並補齊繁體中文詞表與全量自動化測試。
+
 ### v2.16.14
 - **緊急修正 Windows 切號報 `process-list-unavailable` 略過憑證恢復的回歸問題（closes #120）**：重構 [relaunch-worker.mjs](../scripts/relaunch-worker.mjs) 的 `listWindowsCredentialWriters()`，不再呼叫容易在桌面多程序環境下逾時的無映像 `tasklist /FI USERNAME` 掃描；改為先執行快速全量 `tasklist /FO CSV /NH` 並放行非目標 `PID 0`（`System Idle Process`），僅在存在殘留憑證寫入程序時按具體 `IMAGENAME + USERNAME` 窄查詢並相容中文/英文無符合提示。
 - **修正 WSL2 模式下代理重啟失敗與 `not-applied` 狀態失配循環（closes #113）**：WSL2 重啟一律將 `relaunch-worker.mjs` 複製至 Windows `%TEMP%` 並切換對應工作目錄（避免 9P UNC 路徑卡頓超過 6 秒 ACK 逾時）；補齊重啟參數 `--wsl-distro=<distro>` 透傳與白名單校驗；在 [relaunch-worker.mjs](../scripts/relaunch-worker.mjs) 針對 WSL2 任務透過 `WSLENV` `/u` 單向透傳代理環境變數、`AGY_POWERTOOLS_PROXY_SPEC` 與 `GODEBUG`，關閉代理時自動清理。
@@ -252,6 +266,9 @@ sh ./install.sh
   - Windows 重啟器支援 `language_server_windows_*.exe` / `agy.exe` 辨識與 `tasklist` 異常 fail-closed，保留自訂 `ANTIGRAVITY_USER_DATA_DIR`，憑證信箱空值 fail-closed 並將 Win32 JSON 解析升級為 `.NET JavaScriptSerializer`，補齊多帳號額度歸因保護與切號鎖；
   - 伴生輔助頁更新狀態機新增 `submitting` 階段、單調遞增 `requestId` 與 `lastUpdateActionAt` 消除輪詢競態；
   - [lifecycle.mjs](../lib/lifecycle.mjs) 與 [update-manager.mjs](../lib/update-manager.mjs) 補全 `realpathSync.native` 根路徑 TOCTOU 釘死與全路徑 `assertOwnedPath` 校驗。
+
+<details>
+<summary>檢視歷史版本（v2.16.4 - v2.16.11）</summary>
 
 ### v2.16.11
 - **修正 SOCKS5 代理下伴生程序當機與重啟穩定性（#93，#64）**：移除會使 Node `fetch` 在 SOCKS5 環境下異常的 `NODE_USE_ENV_PROXY`，[pricing.mjs](../lib/pricing.mjs) 統一改走 `createProxyFetcher()`；Windows 重啟 ACK 等待延長至 6 秒並於失敗時清理 `lastRelaunchAt`，支援外部代理設定變更時自動重啟，捷徑修補改為非阻塞執行，且 4 秒除錯連接埠輪詢不再誤清 24 小時重啟熔斷狀態。
@@ -308,6 +325,8 @@ sh ./install.sh
 - **降低長會話輪詢的解析與傳輸開銷（#62）**：伴生程序依檔案指紋（含 `task.md`）、完整執行狀態、費率與設定快取解析結果，前端攜帶 `knownRev` 且狀態未變動時直接回傳 `{ unchanged: true, stateRev }`，並由前端依 `phaseStartedAtMs` 本機推進階段計時。
 - **修正 macOS 冷啟動自動重啟冷卻殘留與並行競態（#64）**、**修正原位編輯快速鍵與草稿復原（#70）**、**消除切換會話時備用目錄閃爍（#74）**，以及**支援自訂翻譯字典 `custom-i18n.json`、補齊 2.35 斜線指令說明並依作業系統語系初始化預設語言（#68、#69）**。
 - **社群 PR 合併**：SSH 遠端視窗早期啟動復原（PR #67，感謝 `@qimengdunjia`）、合併 Antigravity CLI 統計與 Argon 獨立額度池（PR #71，感謝 `@zhangyu-ch`）、管理頁頂列與篩選列捲動吸頂（PR #72，感謝 `@niuanhua-ydy`）。
+
+</details>
 
 檢視完整歷史版本請見 [README.md](../README.md#更新日志)。
 

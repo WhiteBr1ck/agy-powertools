@@ -89,9 +89,18 @@ test('Traditional Chinese (zh-TW) uses Taiwan IT terminology, converts UI string
   assert.equal(toZhTw('21小时53分18秒'), '21小時53分18秒');
   assert.equal(toZhTw('Token 计数单位：K / M / B（国际通用）或 万 / 亿（中文计数）'), 'Token 計數單位：K / M / B（國際通用）或 萬 / 億（中文計數）');
   assert.equal(toZhTw('费用显示币种：人民币 (¥) / 美元 ($)'), '費用顯示幣種：人民幣 (¥) / 美元 ($)');
+  assert.equal(toZhTw('选择语义彩色或低干扰静谧单色额度光环。'), '選擇語義彩色或低干擾靜謐單色額度光環。');
+  assert.equal(toZhTw('窄窗口固定概览面板'), '窄視窗固定概覽面板');
+  assert.equal(toZhTw('固定概览面板（窄窗口不自动隐藏）'), '固定概覽面板（窄視窗不自動隱藏）');
+  assert.equal(toZhTw('取消固定概览面板'), '取消固定概覽面板');
+  assert.equal(toZhTw('默认关闭。开启后在窗口缩窄时保持右侧概览侧停不自动隐藏，也可点概览右上角图钉快速切换。'), '預設關閉。開啟後在視窗縮窄時保持右側概覽側停不自動隱藏，也可點概覽右上角圖釘快速切換。');
+  assert.equal(toZhTw('动效与侧栏'), '動效與側欄');
+  assert.equal(toZhTw('思维过程翻译与双语对照，按 Tab 采纳，已存系统凭据库'), '思維過程翻譯與雙語對照，按 Tab 採納，已存系統憑證庫');
+  assert.equal(toZhTw('高级功能：自定义供应商与粘贴 API 密钥'), '進階功能：自訂供應商與貼上 API 密鑰');
+  assert.equal(toZhTw('默认关闭。空闲且输入框为空时在行内显示续写建议，按 Tab 采纳；需在下方配置自定义 AI 模型。'), '預設關閉。空閒且輸入框為空時在行內顯示續寫建議，按 Tab 採納；需在下方配置自訂 AI 模型。');
   assert.doesNotMatch(readFileSync('lib/zh-tw.mjs', 'utf8'), /'仍'\s*:\s*'仍'/);
-  const simplifiedOnly=/[万亿币种国与个为义于产仅从仓们价优会传体余侧关内写准减凑凭击划则刚创删务动区协单占却历压参发变号后听启周响唤围图圆场声处备头夹实审对导将尝尽层带帮并广库应开异强归当录径忆态总战执扩扬抢护报担拦择挂换据数断无旧时昵显暂机权条来栏树样档检汇没洁浅测浏滚满点热状独环现电监盘码确碍离积称稳筛签简类紧级线组细织终结给络绝统继续缓编缩网联脑范营补装观规视览触计订认让议记许设访证识诊试话询该详语误说请读调败账费资转轮软载较辅辑输边过运这进远违连迟适选遥邮采钟钥钮链销错键长闭问闲间阅队阶际险随隐静页顶项顺顿预频题额风馈驻验骤麦标彻么释谈极扫经齐绪购买维铺迁滞册办学杠盖纯纲胶脚觉脉晕]/;
-  for(const file of ['lib/native-i18n.js','lib/native-panels.js','lib/native-sidebar-monitor.js','lib/native-sidebar-drop.mjs','lib/native-ui.js','lib/sidecar-ui.mjs']){
+  const simplifiedOnly=/[万亿币种国与个为义于产仅从仓们价优会传体余侧关内写准减凑凭击划则刚创删务动区协单占却历压参发变号后听启周响唤围图圆场声处备头夹实审对导将尝尽层带帮并广库应开异强归当录径忆态总战执扩扬抢护报担拦择挂换据数断无旧时昵显暂机权条来栏树样档检汇没洁浅测浏滚满点热状独环现电监盘码确碍离积称稳筛签简类紧级线组细织终结给络绝统继续缓编缩网联脑范营补装观规视览触计订认让议记许设访证识诊试话询该详语误说请读调败账费资转轮软载较辅辑输边过运这进远违连迟适选遥邮采钟钥钮链销错键钉长闭问闲间阅队阶际险随隐静页顶项顺顿预频题额风馈驻验骤麦标彻么释谈极扫经齐绪购买维铺迁滞册办学杠盖纯纲胶脚觉脉晕译双纳飞]/;
+  for(const file of ['lib/native-i18n.js','lib/native-panels.js','lib/native-sidebar-monitor.js','lib/native-sidebar-drop.mjs','lib/native-ui.js','lib/native-beta-ai.js','lib/sidecar-ui.mjs']){
     const converted=toZhTw(readFileSync(file,'utf8')).replace(/简体中文|批准/g,'');
     const leftover=converted.match(simplifiedOnly);
     assert.equal(leftover,null,`Unexpected simplified glyph ${leftover?.[0]} in ${file}`);
@@ -353,7 +362,7 @@ test('every pack covers the native catalog, static UI calls, and sidebar menus',
   const source = readFileSync('lib/native-i18n.js','utf8');
   const native = vm.runInNewContext(source.slice(source.indexOf('const pairs'),source.indexOf('const zh=new Map'))+'pairs');
   const keys = new Set([...native.map(([key])=>key),...menuLabels]);
-  for (const file of ['native-panels.js','native-ui.js','native-sidebar-monitor.js','native-sidebar-drop.mjs','native-ssh-paste.mjs','launcher.mjs']) {
+  for (const file of ['native-panels.js','native-ui.js','native-beta-ai.js','native-sidebar-monitor.js','native-sidebar-drop.mjs','native-ssh-paste.mjs','launcher.mjs']) {
     const script = readFileSync('lib/'+file,'utf8');
     for (const match of script.matchAll(/(?:uiText|text)\(\s*(?:'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")\s*,\s*('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")\s*\)/g)) keys.add(vm.runInNewContext(match[1]));
   }
@@ -373,7 +382,7 @@ test('every pack covers the native catalog, static UI calls, and sidebar menus',
       assert.ok(pack.uiEntries[beamKey]?.trim(), `${lang}: missing beam style key ${beamKey}`);
       assert.doesNotMatch(pack.uiEntries[beamKey], /[\u00b7\u2022\u2027\u30fb]|Pulse Inner|Pulse Outside/u, `${lang}: invalid beam style translation for ${beamKey}`);
     }
-    for (const settingsKey of ['Beams & Sidebar', 'Stats & Chat', 'Accounts & Proxy', 'Search settings…', 'No matching settings', 'Beams & halos', 'Sidebar & layout', 'Config & reset', 'Settings backup & reset', 'Token unit', 'K / M / B (International)', 'Wan / Yi (Chinese)', 'Display currency', 'USD ($)', 'CNY (¥)', 'Price per 1M tokens (CNY)']) {
+    for (const settingsKey of ['Motion & Sidebar', 'Stats & Chat', 'Accounts & Proxy', 'Search settings…', 'No matching settings', 'Beams & halos', 'Sidebar & layout', 'Config & reset', 'Settings backup & reset', 'Token unit', 'K / M / B (International)', 'Wan / Yi (Chinese)', 'Display currency', 'USD ($)', 'CNY (¥)', 'Price per 1M tokens (CNY)', 'Halo tone', 'Semantic', 'Monochrome', 'Composer indicator style', 'Muted gray', 'Icon only', 'Composer quota indicator', 'Quota window', 'Choose which quota window the composer indicator tracks; Auto uses the lower of 5-hour and weekly limits.', 'View accounts & quota', 'Account quota', 'Remaining quota', 'Pin Overview in narrow windows', 'Unpin Overview panel', 'Disabled by default. Keeps the right Overview panel docked when the window narrows; also toggleable via the pin icon in Overview.', 'Thinking translation', 'Translation engine', 'Google Translate (free)', 'Custom AI model', 'Display mode', 'Translated only', 'Bilingual', 'Trigger mode', 'Auto translate', 'Manual click', 'Clear translation cache', 'Composer intent prediction', 'Disabled by default. Shows an inline continuation suggestion when idle and the composer is empty, accepted via Tab; requires a custom AI model below.', 'Custom providers', 'Custom provider', 'Add provider', 'Edit provider', 'OpenAI-compatible', 'Anthropic-compatible', 'Gemini-compatible', 'API Key', 'Paste API key', 'Show API key', 'Hide API key', 'Select matching', 'Show fetched models', 'Fetch models', 'Default model', 'Thinking translation model', 'Intent prediction model', 'Follow default model', 'Add a provider first', 'Search models or providers…', 'Connection test succeeded', 'Translate thinking', 'Translated', 'Original']) {
       assert.ok(pack.uiEntries[settingsKey]?.trim(), `${lang}: missing Settings category/search key ${settingsKey}`);
       assert.doesNotMatch(pack.uiEntries[settingsKey], /[\u00b7\u2022\u2027\u30fb]/u, `${lang}: forbidden dot in Settings key ${settingsKey}`);
     }
@@ -381,7 +390,7 @@ test('every pack covers the native catalog, static UI calls, and sidebar menus',
     assert.equal(Object.hasOwn(pack.uiEntries, 'Default quota window'), false, `${lang}: stale Default quota window key`);
     assert.equal(Object.hasOwn(pack.uiEntries, 'Pulse Inner'), false, `${lang}: stale Pulse Inner key`);
     assert.equal(Object.hasOwn(pack.uiEntries, 'Pulse Outside'), false, `${lang}: stale Pulse Outside key`);
-    for (const staleKey of ['Reference rate (USD -> CNY)', 'Display conversion only; local records and official prices stay in USD.', 'Rate must be between 0.1 and 1000', 'Ref. rate', 'Reset 7.2']) {
+    for (const staleKey of ['Reference rate (USD -> CNY)', 'Display conversion only; local records and official prices stay in USD.', 'Rate must be between 0.1 and 1000', 'Ref. rate', 'Reset 7.2', 'Beams & Sidebar', 'Show quota in sidebar footer', 'Disabled by default. Shows a compact 5-hour and weekly quota strip at the bottom of the left sidebar.', 'View Accounts & Quota', 'Local Ollama', 'Official Gemini', 'Stored in OS keyring', 'Save key', 'Clear key']) {
       assert.equal(Object.hasOwn(pack.uiEntries, staleKey), false, `${lang}: stale ${staleKey} key`);
     }
     assert.deepEqual(pack.patterns.map(([pattern]) => pattern), basePatternRegexes, `${lang}: pattern parity`);
@@ -765,4 +774,51 @@ test('PR #83 selective absorption protects conversation titles, scopes risky sin
     assert.equal(tAttr(plainOverviewRow, 'Modified Files', lang), t('Modified Files', lang), `${lang}: tAttr translates normal Overview label`);
   }
   ctx.__agyLocalization.dispose();
+});
+
+test('Composer intent prediction loading phrases cover all 10 languages cleanly with zero forbidden dots', () => {
+  const phrases = [
+    ['大脑飞速旋转中…', '大腦飛速旋轉中…', 'Spinning up the next idea...'],
+    ['正在偷看上下文…', '正在偷看上下文…', 'Peeking at the context...'],
+    ['顺着思路往下猜…', '順著思路往下猜…', 'Following your train of thought...'],
+    ['帮你先起个头…', '幫你先起個頭…', 'Drafting a quick opener...'],
+    ['预判你的下一步…', '預判你的下一步…', 'Anticipating your next move...'],
+    ['速读刚才的内容…', '速讀剛才的內容…', 'Skimming the last turn...'],
+    ['灵感正在路上…', '靈感正在路上…', 'Catching a good follow-up...'],
+    ['替你打个草稿…', '替你打個草稿…', 'Sketching your next prompt...'],
+    ['从上下文找线索…', '從上下文找線索…', 'Reading between the lines...'],
+    ['琢磨接下来问什么…', '琢磨接下來問什麼…', 'Thinking of what comes next...']
+  ];
+  const forbiddenDot = /[\u00b7\u2022\u2027\u30fb]/u;
+  const source = readFileSync('lib/native-i18n.js', 'utf8');
+  const doc = { nodeType: 9, createTreeWalker: () => ({ nextNode: () => null }), querySelectorAll: () => [] };
+  const ctx = vm.createContext({
+    document: doc,
+    NodeFilter: { SHOW_TEXT: 4 },
+    MutationObserver: class { observe() {} disconnect() {} },
+    __agyToZhTw: toZhTw
+  });
+  vm.runInContext(source, ctx);
+
+  for (const [zh, expectedTw, en] of phrases) {
+    assert.equal(toZhTw(zh), expectedTw, `zh-TW conversion mismatch for ${zh}`);
+    assert.equal(ctx.__agyI18n.uiText(zh, en, 'zh-CN'), zh);
+    assert.equal(ctx.__agyI18n.uiText(zh, en, 'zh-TW'), expectedTw);
+    assert.equal(ctx.__agyI18n.uiText(zh, en, 'en'), en);
+    assert.doesNotMatch(zh, forbiddenDot);
+    assert.doesNotMatch(expectedTw, forbiddenDot);
+    assert.doesNotMatch(en, forbiddenDot);
+  }
+
+  for (const lang of packLanguages) {
+    const pack = getLocalePack(lang);
+    ctx.__agyLocalePack = pack;
+    for (const [zh, , en] of phrases) {
+      assert.ok(Object.hasOwn(pack.uiEntries, en) && pack.uiEntries[en]?.trim(), `${lang}: missing loading phrase ${en}`);
+      const translated = pack.uiEntries[en];
+      assert.notEqual(translated, en, `${lang}: untranslated loading phrase ${en}`);
+      assert.doesNotMatch(translated, forbiddenDot, `${lang}: forbidden dot in ${en}`);
+      assert.equal(ctx.__agyI18n.uiText(zh, en, lang), translated, `${lang}: uiText mismatch for ${en}`);
+    }
+  }
 });

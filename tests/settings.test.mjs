@@ -4,6 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  COMPOSER_HALO_TONES,
+  COMPOSER_INDICATOR_TONES,
   createSettingsStore,
   CURRENCIES,
   DEFAULT_SETTINGS,
@@ -16,6 +18,9 @@ import {
   SETTINGS_IMPORT_MAX_BYTES,
   SIDEBAR_BEAM_STYLES,
   stripProxyUrlCredentials,
+  THINKING_DISPLAY_MODES,
+  THINKING_TRANSLATE_ENGINES,
+  THINKING_TRIGGER_MODES,
   TOKEN_UNITS
 } from '../lib/settings.mjs';
 import { startNativeIntegration } from '../lib/native-host.mjs';
@@ -52,24 +57,43 @@ test('settings persist, merge safely, and reject unknown options without changin
     assert.equal(store.get().userBubbleStrength, 100);
     store.set({ userBubbleTint: false, userBubblePreset: 'accent', userBubbleColor: '#2F75C3', userBubbleStrength: 20 });
     assert.equal(store.get().overviewQuota, false);
+    assert.equal(DEFAULT_SETTINGS.pinOverview, false);
+    assert.equal(store.get().pinOverview, false);
+    store.set({ pinOverview: true });
+    assert.equal(createSettingsStore(directory).get().pinOverview, true);
+    store.set({ pinOverview: false });
+    assert.equal(store.get().pinOverview, false);
     assert.equal(store.get().titlebarQuickPanel, false);
     store.set({ titlebarQuickPanel: true });
     assert.equal(store.get().titlebarQuickPanel, true);
     store.set({ titlebarQuickPanel: false });
     assert.equal(store.get().composerQuotaHalo, false);
     assert.equal(store.get().composerQuotaHaloWindow, 'auto');
+    assert.equal(store.get().composerQuotaHaloTone, 'semantic');
+    assert.equal(store.get().composerIndicatorTone, 'semantic');
+    assert.equal(store.get().composerIndicatorCompact, false);
+    assert.equal(store.get().composerQuota, false);
+    assert.equal(store.get().composerQuotaWindow, 'auto');
+    assert.deepEqual([...COMPOSER_INDICATOR_TONES], ['semantic', 'muted']);
+    assert.deepEqual([...COMPOSER_HALO_TONES], ['semantic', 'monochrome']);
     assert.equal(store.get().composerWorkingBeam, false);
     assert.equal(store.get().composerWorkingBeamPalette, 'gemini');
-    store.set({ overviewQuota: true, composerQuotaHalo: true, composerQuotaHaloWindow: 'weekly', composerWorkingBeam: true, composerWorkingBeamPalette: 'aurora' });
+    store.set({ overviewQuota: true, composerQuota: true, composerQuotaWindow: 'weekly', composerIndicatorTone: 'muted', composerIndicatorCompact: true, composerQuotaHalo: true, composerQuotaHaloWindow: 'weekly', composerQuotaHaloTone: 'monochrome', composerWorkingBeam: true, composerWorkingBeamPalette: 'aurora' });
     assert.equal(store.get().overviewQuota, true);
+    assert.equal(store.get().composerQuota, true);
+    assert.equal(store.get().composerQuotaWindow, 'weekly');
+    assert.equal(store.get().composerIndicatorTone, 'muted');
+    assert.equal(store.get().composerIndicatorCompact, true);
     assert.equal(store.get().composerQuotaHalo, true);
     assert.equal(store.get().composerQuotaHaloWindow, 'weekly');
+    assert.equal(store.get().composerQuotaHaloTone, 'monochrome');
     assert.equal(store.get().composerWorkingBeam, true);
     assert.equal(store.get().composerWorkingBeamPalette, 'aurora');
-    store.set({ composerQuotaHaloWindow: '5h', composerWorkingBeamPalette: 'quota' });
+    store.set({ composerQuotaWindow: '5h', composerQuotaHaloWindow: '5h', composerWorkingBeamPalette: 'quota' });
+    assert.equal(store.get().composerQuotaWindow, '5h');
     assert.equal(store.get().composerQuotaHaloWindow, '5h');
     assert.equal(store.get().composerWorkingBeamPalette, 'quota');
-    store.set({ overviewQuota: false, composerQuotaHalo: false, composerQuotaHaloWindow: 'auto', composerWorkingBeam: false, composerWorkingBeamPalette: 'gemini' });
+    store.set({ overviewQuota: false, composerQuota: false, composerQuotaWindow: 'auto', composerIndicatorTone: 'semantic', composerIndicatorCompact: false, composerQuotaHalo: false, composerQuotaHaloWindow: 'auto', composerQuotaHaloTone: 'semantic', composerWorkingBeam: false, composerWorkingBeamPalette: 'gemini' });
     assert.equal(store.get().messageEdit, true);
     assert.equal(store.get().fileContextMenu, true);
     assert.equal(store.get().macAutoRelaunch, true);
@@ -169,7 +193,7 @@ test('settings persist, merge safely, and reject unknown options without changin
     store.set({contextLimit:256000});assert.equal(store.get().contextLimit,256000);
     store.set({contextLimit:0});assert.equal(store.get().contextLimit,0);
     const before = readFileSync(join(directory, 'settings.json'), 'utf8');
-    for (const value of [{ compact: 'false' }, { turnMeta: 'yes' }, { userBubbleTint: 'yes' }, { userBubblePreset: 'neon' }, { userBubbleColor: 'red' }, { userBubbleColor: '#123;color:red' }, { userBubbleStrength: 5 }, { userBubbleStrength: 105 }, { userBubbleStrength: 20.5 }, { sessionSearch: 'yes' }, { sidebarFolderDrop: 'yes' }, { sidebarFolderDropPin: 'yes' }, { composerQuotaHaloWindow: '1d' }, { sidebarRunningBeam: 'yes' }, { sidebarRunningBeamPalette: 'quota' }, { sidebarRunningBeamStyle: 'pulse' }, { sidebarRunningBeamStyle: 'orbit' }, { sidebarRunningBeamStyle: 123 }, { sidebarHideNativeSpinner: 1 }, { sidebarRunningGroup: 'on' }, { unknown: true }, { toString: false }, {language:'invalid'}, {overviewRange:'custom'}, {overviewRange:'invalid'}, {pricingMode:'batch'}, {pricingMode:true}, {tokenUnit:'metric'}, {tokenUnit:1}, {currency:'EUR'}, {currency:'cny'}, {cnyRate:7.2}, {accountViewMode:'grid'}, {accountQuotaWindow:'1h'}, {proxyUrl:'ftp://127.0.0.1:21'}, {proxyUrl:'http://127.0.0.1:7897;calc'}, {proxyBypass:'localhost"bad'}, {contextLimit:999999}, []]) assert.throws(() => store.set(value), /设置/);
+    for (const value of [{ compact: 'false' }, { pinOverview: 'yes' }, { pinOverview: 1 }, { turnMeta: 'yes' }, { userBubbleTint: 'yes' }, { userBubblePreset: 'neon' }, { userBubbleColor: 'red' }, { userBubbleColor: '#123;color:red' }, { userBubbleStrength: 5 }, { userBubbleStrength: 105 }, { userBubbleStrength: 20.5 }, { sessionSearch: 'yes' }, { sidebarFolderDrop: 'yes' }, { sidebarFolderDropPin: 'yes' }, { composerQuotaWindow: '1d' }, { composerQuotaWindow: true }, { composerQuotaHaloWindow: '1d' }, { composerQuotaHaloTone: 'neon' }, { composerIndicatorTone: 'mono' }, { composerIndicatorCompact: 'yes' }, { composerQuota: 1 }, { sidebarRunningBeam: 'yes' }, { sidebarRunningBeamPalette: 'quota' }, { sidebarRunningBeamStyle: 'pulse' }, { sidebarRunningBeamStyle: 'orbit' }, { sidebarRunningBeamStyle: 123 }, { sidebarHideNativeSpinner: 1 }, { sidebarRunningGroup: 'on' }, { unknown: true }, { toString: false }, {language:'invalid'}, {overviewRange:'custom'}, {overviewRange:'invalid'}, {pricingMode:'batch'}, {pricingMode:true}, {tokenUnit:'metric'}, {tokenUnit:1}, {currency:'EUR'}, {currency:'cny'}, {cnyRate:7.2}, {accountViewMode:'grid'}, {accountQuotaWindow:'1h'}, {proxyUrl:'ftp://127.0.0.1:21'}, {proxyUrl:'http://127.0.0.1:7897;calc'}, {proxyBypass:'localhost"bad'}, {contextLimit:999999}, []]) assert.throws(() => store.set(value), /设置/);
     assert.equal(readFileSync(join(directory, 'settings.json'), 'utf8'), before);
     store.set(DEFAULT_SETTINGS); assert.deepEqual(store.get(), DEFAULT_SETTINGS);
     store.set({ compact: false, language: DEFAULT_SETTINGS.language === 'en' ? 'zh-CN' : 'en' });
@@ -250,19 +274,31 @@ test('stripProxyUrlCredentials and exportSettingsPayload strip proxy auth and ex
   );
 
   // Without proxy credentials, strippedProxyAuth is false
-  const cleanExport = exportSettingsPayload({ ...DEFAULT_SETTINGS, proxyUrl: 'http://127.0.0.1:7897', sidebarRunningBeamStyle: 'pulse-outside', tokenUnit: 'zh', currency: 'CNY' });
+  const cleanExport = exportSettingsPayload({ ...DEFAULT_SETTINGS, proxyUrl: 'http://127.0.0.1:7897', sidebarRunningBeamStyle: 'pulse-outside', tokenUnit: 'zh', currency: 'CNY', composerIndicatorTone: 'muted', composerIndicatorCompact: true, composerQuota: true, composerQuotaWindow: '5h', composerQuotaHaloTone: 'monochrome', pinOverview: true });
   assert.equal(cleanExport.strippedProxyAuth, false);
   assert.equal(cleanExport.settings.proxyUrl, 'http://127.0.0.1:7897');
   assert.equal(cleanExport.settings.sidebarRunningBeamStyle, 'pulse-outside');
   assert.equal(cleanExport.settings.tokenUnit, 'zh');
   assert.equal(cleanExport.settings.currency, 'CNY');
+  assert.equal(cleanExport.settings.composerIndicatorTone, 'muted');
+  assert.equal(cleanExport.settings.composerIndicatorCompact, true);
+  assert.equal(cleanExport.settings.composerQuota, true);
+  assert.equal(cleanExport.settings.composerQuotaWindow, '5h');
+  assert.equal(cleanExport.settings.composerQuotaHaloTone, 'monochrome');
+  assert.equal(cleanExport.settings.pinOverview, true);
   assert.equal(Object.hasOwn(cleanExport.settings, 'cnyRate'), false);
 
-  // Roundtrip sidebarRunningBeamStyle + tokenUnit/currency through sanitizeImportedSettings; legacy cnyRate is cleanly skipped
+  // Roundtrip sidebarRunningBeamStyle + tokenUnit/currency + Issue #114/#115/#116 keys through sanitizeImportedSettings; legacy keys are cleanly skipped
   const beamRoundtrip = sanitizeImportedSettings(JSON.stringify({ ...cleanExport, settings: { ...cleanExport.settings, cnyRate: 7.2 } }));
   assert.equal(beamRoundtrip.patch.sidebarRunningBeamStyle, 'pulse-outside');
   assert.equal(beamRoundtrip.patch.tokenUnit, 'zh');
   assert.equal(beamRoundtrip.patch.currency, 'CNY');
+  assert.equal(beamRoundtrip.patch.composerIndicatorTone, 'muted');
+  assert.equal(beamRoundtrip.patch.composerIndicatorCompact, true);
+  assert.equal(beamRoundtrip.patch.composerQuota, true);
+  assert.equal(beamRoundtrip.patch.composerQuotaWindow, '5h');
+  assert.equal(beamRoundtrip.patch.composerQuotaHaloTone, 'monochrome');
+  assert.equal(beamRoundtrip.patch.pinOverview, true);
   assert.equal(Object.hasOwn(beamRoundtrip.patch, 'cnyRate'), false);
   assert.ok(beamRoundtrip.skippedKeys.includes('cnyRate'));
   const beamInnerImport = sanitizeImportedSettings({
@@ -274,10 +310,10 @@ test('stripProxyUrlCredentials and exportSettingsPayload strip proxy auth and ex
   const beamBadImport = sanitizeImportedSettings({
     format: SETTINGS_EXPORT_FORMAT,
     schemaVersion: 1,
-    settings: { sidebarRunningBeam: true, sidebarRunningBeamStyle: 'invalid-style', tokenUnit: 'invalid', currency: 'EUR', cnyRate: 7.2 }
+    settings: { sidebarRunningBeam: true, sidebarRunningBeamStyle: 'invalid-style', tokenUnit: 'invalid', currency: 'EUR', cnyRate: 7.2, composerIndicatorTone: 'bright', composerQuotaHaloTone: 'rainbow', composerIndicatorCompact: 'yes', composerQuota: 1, composerQuotaWindow: '1d', pinOverview: 'yes' }
   });
   assert.deepEqual(beamBadImport.patch, { sidebarRunningBeam: true });
-  assert.deepEqual(beamBadImport.skippedKeys.sort(), ['cnyRate', 'currency', 'sidebarRunningBeamStyle', 'tokenUnit']);
+  assert.deepEqual(beamBadImport.skippedKeys.sort(), ['cnyRate', 'composerIndicatorCompact', 'composerIndicatorTone', 'composerQuota', 'composerQuotaHaloTone', 'composerQuotaWindow', 'currency', 'pinOverview', 'sidebarRunningBeamStyle', 'tokenUnit']);
 });
 
 test('sanitizeImportedSettings validates envelope, strips proxy credentials, skips non-portable/unknown/invalid keys, and rejects bad payloads (Issue #88)', () => {
@@ -581,6 +617,142 @@ test('multi-device sync settings validate, normalize SSH hosts, and keep local-o
     assert.equal(Object.hasOwn(sanitized.patch, 'syncDir'), false);
     assert.equal(Object.hasOwn(sanitized.patch, 'syncDeviceName'), false);
     assert.equal(Object.hasOwn(sanitized.patch, 'syncSshHosts'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Beta AI settings default off, validate provider::model refs, and keep outbound toggles and model refs non-portable', () => {
+  assert.deepEqual([...THINKING_TRANSLATE_ENGINES], ['free', 'ai']);
+  assert.deepEqual([...THINKING_DISPLAY_MODES], ['replace', 'bilingual']);
+  assert.deepEqual([...THINKING_TRIGGER_MODES], ['auto', 'manual']);
+
+  assert.equal(DEFAULT_SETTINGS.betaThinkingTranslate, false);
+  assert.equal(DEFAULT_SETTINGS.betaThinkingEngine, 'free');
+  assert.equal(DEFAULT_SETTINGS.betaThinkingDisplay, 'replace');
+  assert.equal(DEFAULT_SETTINGS.betaThinkingTrigger, 'auto');
+  assert.equal(DEFAULT_SETTINGS.betaComposerPredict, false);
+  assert.equal(DEFAULT_SETTINGS.betaAiModel, '');
+  assert.equal(DEFAULT_SETTINGS.betaAiTranslateModel, '');
+  assert.equal(DEFAULT_SETTINGS.betaAiPredictModel, '');
+  assert.equal(Object.hasOwn(DEFAULT_SETTINGS, 'betaAiProvider'), false);
+  assert.equal(Object.hasOwn(DEFAULT_SETTINGS, 'betaAiBaseUrl'), false);
+
+  for (const key of [
+    'betaThinkingTranslate',
+    'betaComposerPredict',
+    'betaAiModel',
+    'betaAiTranslateModel',
+    'betaAiPredictModel'
+  ]) {
+    assert.equal(NON_PORTABLE_SETTING_KEYS.has(key), true, `${key} must be non-portable`);
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), 'agy-beta-settings-'));
+  try {
+    const store = createSettingsStore(dir);
+    const longRef = `prov_0123456789ab::${'m'.repeat(200)}`;
+    assert.ok(longRef.length > 160 && longRef.length <= 240);
+
+    store.set({
+      betaThinkingTranslate: true,
+      betaThinkingEngine: 'ai',
+      betaThinkingDisplay: 'bilingual',
+      betaThinkingTrigger: 'manual',
+      betaComposerPredict: true,
+      betaAiModel: `  ${longRef}  `,
+      betaAiTranslateModel: '  prov_a1b2c3d4e5f6::claude-3-5-haiku-latest  ',
+      betaAiPredictModel: '  prov_f6e5d4c3b2a1::gpt-4.1-mini  '
+    });
+    const saved = createSettingsStore(dir).get();
+    assert.equal(saved.betaThinkingTranslate, true);
+    assert.equal(saved.betaThinkingEngine, 'ai');
+    assert.equal(saved.betaThinkingDisplay, 'bilingual');
+    assert.equal(saved.betaThinkingTrigger, 'manual');
+    assert.equal(saved.betaComposerPredict, true);
+    assert.equal(saved.betaAiModel, longRef);
+    assert.equal(saved.betaAiTranslateModel, 'prov_a1b2c3d4e5f6::claude-3-5-haiku-latest');
+    assert.equal(saved.betaAiPredictModel, 'prov_f6e5d4c3b2a1::gpt-4.1-mini');
+
+    // Legacy settings.json containing betaAiProvider / betaAiBaseUrl loads cleanly and strips removed keys
+    writeFileSync(
+      join(dir, 'settings.json'),
+      JSON.stringify({ ...saved, betaAiProvider: 'ollama', betaAiBaseUrl: 'http://127.0.0.1:11434' }, null, 2)
+    );
+    const legacyLoaded = createSettingsStore(dir).get();
+    assert.equal(Object.hasOwn(legacyLoaded, 'betaAiProvider'), false);
+    assert.equal(Object.hasOwn(legacyLoaded, 'betaAiBaseUrl'), false);
+    assert.equal(legacyLoaded.betaAiTranslateModel, 'prov_a1b2c3d4e5f6::claude-3-5-haiku-latest');
+
+    // Reject invalid values without mutating disk
+    const before = readFileSync(join(dir, 'settings.json'), 'utf8');
+    for (const bad of [
+      { betaThinkingTranslate: 'yes' },
+      { betaThinkingEngine: 'deepl' },
+      { betaThinkingDisplay: 'side-by-side' },
+      { betaThinkingTrigger: 'hover' },
+      { betaComposerPredict: 1 },
+      { betaAiProvider: 'openai' },
+      { betaAiBaseUrl: 'https://api.openai.com/v1' },
+      { betaAiModel: 'x'.repeat(241) },
+      { betaAiModel: 'prov_1::gpt-4o\nmini' },
+      { betaAiTranslateModel: 'bad\u0000model' },
+      { betaAiPredictModel: 42 }
+    ]) {
+      assert.throws(() => store.set(bad), /设置/, `expected throw for ${JSON.stringify(bad)}`);
+    }
+    assert.equal(readFileSync(join(dir, 'settings.json'), 'utf8'), before);
+
+    // Export excludes betaThinkingTranslate, betaComposerPredict, and all local provider::model refs
+    const exported = exportSettingsPayload({
+      ...saved,
+      betaThinkingTranslate: true,
+      betaComposerPredict: true
+    }, { pluginVersion: '2.17.0' });
+    for (const key of [
+      'betaThinkingTranslate',
+      'betaComposerPredict',
+      'betaAiModel',
+      'betaAiTranslateModel',
+      'betaAiPredictModel',
+      'betaAiProvider',
+      'betaAiBaseUrl'
+    ]) {
+      assert.equal(Object.hasOwn(exported.settings, key), false, `exported settings must exclude ${key}`);
+    }
+    assert.equal(exported.settings.betaThinkingEngine, 'ai');
+    assert.equal(exported.settings.betaThinkingDisplay, 'bilingual');
+    assert.equal(exported.settings.betaThinkingTrigger, 'manual');
+
+    // Import strictly skips non-portable beta toggles, model refs, and legacy provider/baseUrl keys
+    const imported = sanitizeImportedSettings({
+      format: SETTINGS_EXPORT_FORMAT,
+      schemaVersion: 1,
+      settings: {
+        betaThinkingTranslate: true,
+        betaComposerPredict: true,
+        betaAiProvider: 'openai',
+        betaAiBaseUrl: 'https://evil.example.com/v1',
+        betaAiModel: 'prov_123::gpt-4o',
+        betaAiTranslateModel: 'prov_123::gpt-4o-mini',
+        betaAiPredictModel: 'prov_123::gpt-4.1-mini',
+        betaThinkingDisplay: 'bilingual',
+        betaThinkingEngine: 'ai'
+      }
+    });
+    assert.deepEqual(imported.patch, {
+      betaThinkingDisplay: 'bilingual',
+      betaThinkingEngine: 'ai'
+    });
+    assert.deepEqual(imported.skippedKeys.sort(), [
+      'betaAiBaseUrl',
+      'betaAiModel',
+      'betaAiPredictModel',
+      'betaAiProvider',
+      'betaAiTranslateModel',
+      'betaComposerPredict',
+      'betaThinkingTranslate'
+    ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

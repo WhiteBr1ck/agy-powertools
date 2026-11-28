@@ -223,9 +223,15 @@ test('package excludes docs/images screenshots, bootstrap copies all worker impo
   }
 });
 
-test('release includes locale modules, static Windows relaunch scripts, and omits localized repository guides', () => {
+test('release includes locale modules, Beta AI runtime files, static Windows relaunch scripts, and omits localized repository guides', () => {
   const names = new Set(original.files.map(file=>file.path));
   for (const lang of ['index','fr','ja','ko','de','es','ru','vi']) assert.ok(names.has(`lib/locales/${lang}.mjs`));
+  for (const betaFile of ['lib/ai-provider.mjs','lib/translator.mjs','lib/intent-predictor.mjs','lib/native-beta-ai.js']) {
+    assert.ok(names.has(betaFile), `missing required Beta file ${betaFile}`);
+    const stripped = structuredClone(original);
+    stripped.files = stripped.files.filter(f => f.path !== betaFile);
+    assert.throws(() => validatePackage(stripped), /缺少必要文件/);
+  }
   assert.ok(names.has('scripts/relaunch-worker.mjs'));
   assert.ok(names.has('scripts/relaunch-antigravity.cmd'));
   assert.ok(names.has('scripts/launch-macos.mjs'));

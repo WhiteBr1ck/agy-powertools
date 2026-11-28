@@ -16,6 +16,7 @@ import {
 } from '../lib/account-helpers.mjs';
 import { createAccountsStore } from '../lib/accounts.mjs';
 import { createQuotaTracker } from '../lib/quota.mjs';
+import { toZhTw } from '../lib/zh-tw.mjs';
 
 function createFakeVault(initial = {}) {
   const slots = new Map(Object.entries(initial));
@@ -274,8 +275,10 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     React,
     Intl,
     URL,
+    __agyToZhTw: toZhTw,
     window: { addEventListener() {}, removeEventListener() {} },
     location: { pathname: '/' },
+    ...(hooks.localStorage ? { localStorage: hooks.localStorage } : {}),
     document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} }, querySelector: hooks.querySelector || (() => null) },
     setInterval: hooks.setInterval || (() => 1),
     clearInterval: hooks.clearInterval || (() => {}),
@@ -341,7 +344,14 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     consumeScrollToAbout: () => Boolean(hooks.scrollToAbout),
     openUpdateSettings: () => hooks.onOpenUpdateSettings?.(),
     syncUpdateResult: res => hooks.onSyncUpdateResult?.(res),
-    isTurnRunning: () => Boolean(hooks.isTurnRunning?.())
+    isTurnRunning: () => Boolean(hooks.isTurnRunning?.()),
+    betaProviders: () => (typeof hooks.betaProviders === 'function' ? hooks.betaProviders() : hooks.betaProviders),
+    betaProvidersList: () => (hooks.betaProvidersList ? hooks.betaProvidersList() : Promise.resolve({ ok: true, providers: [] })),
+    betaProviderSave: payload => (hooks.betaProviderSave ? hooks.betaProviderSave(payload) : Promise.resolve({ ok: true, provider: payload, providers: [payload] })),
+    betaProviderDelete: id => (hooks.betaProviderDelete ? hooks.betaProviderDelete(id) : Promise.resolve({ ok: true, removed: true, providers: [] })),
+    betaAiListModels: params => (hooks.betaAiListModels ? hooks.betaAiListModels(params) : Promise.resolve({ ok: true, models: [] })),
+    betaAiTest: params => (hooks.betaAiTest ? hooks.betaAiTest(params) : Promise.resolve({ ok: true, latencyMs: 42, model: params?.model || '' })),
+    betaClearTranslateCache: () => (hooks.betaClearTranslateCache ? hooks.betaClearTranslateCache() : Promise.resolve({ ok: true }))
   });
   function renderChild(node) {
     const prevComp = activeComponent;
@@ -392,12 +402,14 @@ function createPanelHarness(accountsData, opts = {}, hooks = {}) {
     renderEventTable: (dashboard, errors = false) => { activeComponent = errors ? 'errors' : 'requests'; hookIdx = 0; return panels.EventTable({ dashboard, errors }); },
     renderSwitcher: () => { activeComponent = 'switcher'; hookIdx = 0; return panels.AccountSwitcher(); },
     renderQuickPopover: () => { activeComponent = 'quick-popover'; hookIdx = 0; return panels.QuickPopover(); },
+    renderPage: () => { activeComponent = 'page'; hookIdx = 0; return panels.Page(); },
     renderOverviewQuota: () => { activeComponent = 'overview-quota'; hookIdx = 0; return panels.OverviewQuota(); },
     renderQuotas: () => { activeComponent = 'quotas'; hookIdx = 0; return panels.Quotas(); },
     renderPricing: dashboard => { activeComponent = 'pricing'; hookIdx = 0; return panels.Pricing({ dashboard }); },
     renderSettings: () => { activeComponent = 'settings'; hookIdx = 0; return panels.Settings(); },
     renderSidebar: () => { activeComponent = 'sidebar'; hookIdx = 0; return panels.Sidebar(); },
     renderAbout: () => { activeComponent = 'about'; hookIdx = 0; return panels.About(); },
+    unmountComponent: name => { for (const k of [...componentStates.keys()]) if (k === name || k.startsWith(`${name}>`)) componentStates.delete(k); },
     collectText,
     find,
     findAll
@@ -2275,7 +2287,7 @@ test('Settings renders 5 category tabs, live cross-category search, nested subor
   assert.equal(catNav.props.role, 'tablist');
   const expectedCats = [
     ['general', '常规与外观', 'agy-setting-row-language'],
-    ['beams', '流光与侧栏', 'agy-setting-row-composerWorkingBeam'],
+    ['beams', '动效与侧栏', 'agy-setting-row-composerWorkingBeam'],
     ['features', '统计与增强', 'agy-setting-row-pricingMode'],
     ['accounts', '账号与网络', 'agy-setting-row-multiAccount'],
     ['system', '系统与维护', 'agy-setting-row-configTransfer']
@@ -2504,4 +2516,381 @@ test('Token unit (compact/zh), silent live FX currency display (USD/CNY with 6.7
   assert.ok(setUi.find(tree, 'agy-setting-row-tokenUnit'));
   assert.equal(setUi.find(tree, 'agy-setting-row-currency'), null);
   assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(setUi.collectText(tree)), false);
+});
+
+test('Issues #115/#116: Settings places halo tone, indicator tone/compact, composerQuota + nested composerQuotaWindow, and Motion & Sidebar tab cleanly', () => {
+  // 1. Settings UI placement: composerQuotaHaloTone inside composerQuotaHalo sub-drawer; composerIndicatorTone + compact + composerQuota + composerQuotaWindow in 统计与进度
+  const changes = [];
+  const ui = createPanelHarness(null, {
+    enabled: true,
+    language: 'zh-CN',
+    composerQuotaHalo: true,
+    composerQuotaHaloTone: 'semantic',
+    contextRing: true,
+    speedStats: true,
+    composerIndicatorTone: 'semantic',
+    composerIndicatorCompact: false,
+    composerQuota: true,
+    composerQuotaWindow: 'auto'
+  }, { onChange: p => changes.push(p) });
+
+  let tree = ui.renderSettings();
+  assert.equal(ui.collectText(ui.find(tree, 'agy-settings-cat-beams')).trim(), '动效与侧栏');
+  ui.find(tree, 'agy-settings-cat-beams').props.onClick();
+  tree = ui.renderSettings();
+  const haloDrawer = ui.find(tree, 'agy-setting-row-composerQuotaHaloWindow');
+  assert.ok(haloDrawer);
+  assert.equal(haloDrawer.props.className, 'pt-bubble-panel');
+  assert.ok(ui.find(haloDrawer, 'agy-setting-row-composerQuotaHaloTone'));
+  assert.ok(ui.find(haloDrawer, 'agy-halo-tone-select'));
+  assert.equal(ui.find(haloDrawer, 'agy-halo-tone-select-semantic')?.props?.selected, true);
+  assert.equal(ui.find(haloDrawer, 'agy-halo-tone-select-monochrome')?.props?.selected, false);
+  ui.find(haloDrawer, 'agy-halo-tone-select-monochrome').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { composerQuotaHaloTone: 'monochrome' });
+
+  ui.find(tree, 'agy-settings-cat-features').props.onClick();
+  tree = ui.renderSettings();
+  const indRow = ui.find(tree, 'agy-setting-row-composerIndicatorTone');
+  assert.ok(indRow);
+  assert.ok(ui.find(indRow, 'agy-composer-tone-select'));
+  assert.equal(ui.find(indRow, 'agy-composer-tone-select-semantic')?.props?.selected, true);
+  assert.equal(ui.find(indRow, 'agy-composer-tone-select-muted')?.props?.selected, false);
+  ui.find(indRow, 'agy-composer-tone-select-muted').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { composerIndicatorTone: 'muted' });
+  const compactToggle = ui.find(indRow, 'agy-setting-composerIndicatorCompact');
+  assert.ok(compactToggle);
+  compactToggle.props.onCheckedChange(true);
+  assert.deepEqual({ ...changes.at(-1) }, { composerIndicatorCompact: true });
+  assert.ok(ui.find(tree, 'agy-setting-row-composerQuota'));
+  const quotaWinDrawer = ui.find(tree, 'agy-setting-row-composerQuotaWindow');
+  assert.ok(quotaWinDrawer);
+  assert.equal(quotaWinDrawer.props.className, 'pt-bubble-panel');
+  assert.ok(ui.find(quotaWinDrawer, 'agy-composer-quota-window'));
+  ui.find(quotaWinDrawer, 'agy-composer-quota-window-5h').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { composerQuotaWindow: '5h' });
+  ui.find(quotaWinDrawer, 'agy-composer-quota-window-weekly').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { composerQuotaWindow: 'weekly' });
+  ui.find(tree, 'agy-setting-composerQuota').props.onCheckedChange(false);
+  assert.deepEqual({ ...changes.at(-1) }, { composerQuota: false });
+  ui.find(tree, 'agy-setting-composerQuota').props.onCheckedChange(true);
+  assert.deepEqual({ ...changes.at(-1) }, { composerQuota: true });
+  assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(ui.collectText(tree)), false);
+
+  // 2. zh-TW & en render updated Motion & Sidebar tab label cleanly
+  const twUi = createPanelHarness(null, { enabled: true, language: 'zh-TW' });
+  assert.equal(twUi.collectText(twUi.find(twUi.renderSettings(), 'agy-settings-cat-beams')).trim(), '動效與側欄');
+  const enUi = createPanelHarness(null, { enabled: true, language: 'en' });
+  assert.equal(enUi.collectText(enUi.find(enUi.renderSettings(), 'agy-settings-cat-beams')).trim(), 'Motion & Sidebar');
+
+  // 3. Indicator style row and composerQuotaWindow drawer hide cleanly when parent toggles are off
+  const hiddenUi = createPanelHarness(null, {
+    enabled: true,
+    language: 'zh-CN',
+    composerQuotaHalo: false,
+    contextRing: false,
+    speedStats: false,
+    composerQuota: false
+  });
+  let hTree = hiddenUi.renderSettings();
+  hiddenUi.find(hTree, 'agy-settings-cat-beams').props.onClick();
+  hTree = hiddenUi.renderSettings();
+  assert.equal(hiddenUi.find(hTree, 'agy-setting-row-composerQuotaHaloTone'), null);
+  hiddenUi.find(hTree, 'agy-settings-cat-features').props.onClick();
+  hTree = hiddenUi.renderSettings();
+  assert.equal(hiddenUi.find(hTree, 'agy-setting-row-composerIndicatorTone'), null);
+  assert.equal(hiddenUi.find(hTree, 'agy-setting-row-composerQuotaWindow'), null);
+
+  // 4. Cross-category search with bilingual keywords finds all settings immediately
+  ui.find(tree, 'agy-settings-cat-general').props.onClick();
+  tree = ui.renderSettings();
+  for (const [query, expectedTestId] of [
+    ['codex', 'agy-setting-row-composerIndicatorTone'],
+    ['静谧', 'agy-setting-row-composerIndicatorTone'],
+    ['monochrome', 'agy-setting-row-composerQuotaHaloTone'],
+    ['图标', 'agy-setting-composerIndicatorCompact'],
+    ['composer quota', 'agy-setting-row-composerQuota'],
+    ['quota window', 'agy-setting-row-composerQuotaWindow'],
+    ['额度周期', 'agy-setting-row-composerQuotaWindow']
+  ]) {
+    ui.find(tree, 'agy-settings-search').props.onChange({ target: { value: query } });
+    tree = ui.renderSettings();
+    assert.ok(ui.find(tree, expectedTestId), `Search "${query}" must find ${expectedTestId}`);
+    assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(ui.collectText(tree)), false, `Search "${query}" must not render middle dots`);
+  }
+});
+
+test('Advanced tab, inline (Beta) tags, uniform Select dropdowns, Custom Providers modal/list, Model Selection pickers, and UI tab persistence work cleanly without middle dots', async () => {
+  const changes = [];
+  let savedProviders = [];
+  const listModelsCalls = [];
+  const testConnCalls = [];
+  const deletedIds = [];
+
+  const ui = createPanelHarness(
+    null,
+    {
+      enabled: true,
+      language: 'zh-CN',
+      sidebarRunningBeam: true,
+      sidebarRunningBeamStyle: 'sweep',
+      betaThinkingTranslate: true,
+      betaThinkingEngine: 'free',
+      betaThinkingDisplay: 'replace',
+      betaThinkingTrigger: 'auto',
+      betaComposerPredict: false,
+      betaAiModel: '',
+      betaAiTranslateModel: '',
+      betaAiPredictModel: ''
+    },
+    {
+      onChange: p => changes.push(p),
+      betaProviders: () => savedProviders,
+      betaProvidersList: async () => ({ ok: true, providers: savedProviders }),
+      betaProviderSave: async payload => {
+        const provider = { ...payload, id: payload.id || `prov-${savedProviders.length + 1}` };
+        const idx = savedProviders.findIndex(p => p.id === provider.id);
+        savedProviders = idx >= 0 ? savedProviders.map(p => (p.id === provider.id ? provider : p)) : [...savedProviders, provider];
+        return { ok: true, provider, providers: savedProviders };
+      },
+      betaProviderDelete: async id => {
+        deletedIds.push(id);
+        savedProviders = savedProviders.filter(p => p.id !== id);
+        return { ok: true, removed: true, providers: savedProviders };
+      },
+      betaAiListModels: async params => {
+        listModelsCalls.push(params);
+        return { ok: true, models: ['gpt-4o-mini', 'gpt-4.1', 'gemini-2.5-flash'] };
+      },
+      betaAiTest: async params => {
+        testConnCalls.push(params);
+        return { ok: true, latencyMs: 128, model: params.model || 'gpt-4o-mini' };
+      }
+    }
+  );
+
+  // 1. 6th category renamed to 高级功能 / 進階功能 / Advanced; sidebar beam style uses Select dropdown
+  let tree = ui.renderSettings();
+  assert.equal(ui.collectText(ui.find(tree, 'agy-settings-cat-beta')).trim(), '高级功能');
+  const twAdvUi = createPanelHarness(null, { enabled: true, language: 'zh-TW' });
+  assert.equal(twAdvUi.collectText(twAdvUi.find(twAdvUi.renderSettings(), 'agy-settings-cat-beta')).trim(), '進階功能');
+  const enAdvUi = createPanelHarness(null, { enabled: true, language: 'en' });
+  const enSettings0 = enAdvUi.renderSettings();
+  assert.equal(enAdvUi.collectText(enAdvUi.find(enSettings0, 'agy-settings-cat-beta')).trim(), 'Advanced');
+
+  // Sidebar beam style converted to Select dropdown (agy-sb-style-select)
+  ui.find(tree, 'agy-settings-cat-beams').props.onClick();
+  tree = ui.renderSettings();
+  assert.ok(ui.find(tree, 'agy-sb-style-select'));
+  assert.equal(ui.find(tree, 'agy-sb-style-select-sweep')?.props?.selected, true);
+  ui.find(tree, 'agy-sb-style-select-pulse-inner').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { sidebarRunningBeamStyle: 'pulse-inner' });
+  ui.find(tree, 'agy-sb-style-select-pulse-outside').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { sidebarRunningBeamStyle: 'pulse-outside' });
+
+  // 2. Switch to 高级功能 (beta): no notice banner, inline (Beta) on both toggles, updated composer predict copy, and 3 Select dropdowns
+  ui.find(tree, 'agy-settings-cat-beta').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-beta-notice'), null);
+  const thinkRow = ui.find(tree, 'agy-setting-row-betaThinkingTranslate');
+  const predictRow = ui.find(tree, 'agy-setting-row-betaComposerPredict');
+  assert.ok(thinkRow && predictRow);
+  assert.equal(ui.collectText(ui.find(thinkRow, 'agy-inline-beta-tag')).trim(), '(Beta)');
+  assert.equal(ui.collectText(ui.find(predictRow, 'agy-inline-beta-tag')).trim(), '(Beta)');
+  assert.equal(predictRow.props.description, '默认关闭。空闲且输入框为空时在行内显示续写建议，按 Tab 采纳；需在下方配置自定义 AI 模型。');
+
+  // Verify English copy for composer intent prediction too
+  enAdvUi.find(enSettings0, 'agy-settings-cat-beta').props.onClick();
+  const enBetaTree = enAdvUi.renderSettings();
+  assert.equal(
+    enAdvUi.find(enBetaTree, 'agy-setting-row-betaComposerPredict').props.description,
+    'Disabled by default. Shows an inline continuation suggestion when idle and the composer is empty, accepted via Tab; requires a custom AI model below.'
+  );
+
+  // Thinking translation options use Select dropdowns
+  assert.ok(ui.find(tree, 'agy-beta-engine-select'));
+  assert.ok(ui.find(tree, 'agy-beta-display-select'));
+  assert.ok(ui.find(tree, 'agy-beta-trigger-select'));
+  ui.find(tree, 'agy-beta-engine-select-ai').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { betaThinkingEngine: 'ai' });
+  ui.find(tree, 'agy-beta-display-select-bilingual').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { betaThinkingDisplay: 'bilingual' });
+  ui.find(tree, 'agy-beta-trigger-select-manual').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { betaThinkingTrigger: 'manual' });
+
+  // 3. Empty providers list + disabled model assignment triggers
+  assert.ok(ui.find(tree, 'agy-ai-providers-empty'));
+  assert.equal(ui.find(tree, 'agy-model-assign-trigger-default').props.disabled, true);
+  assert.ok(ui.collectText(ui.find(tree, 'agy-model-assign-trigger-default')).includes('请先添加供应商'));
+  assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(ui.collectText(tree)), false);
+
+  // 4. Open Add Provider modal: 4 protocols reusing .pt-price-mode, eye key toggle, fetch models picker, test connection, and save
+  ui.find(tree, 'agy-ai-provider-add').props.onClick();
+  tree = ui.renderSettings();
+  const modal = ui.find(tree, 'agy-ai-provider-modal');
+  assert.ok(modal);
+  const protoBar = ui.find(modal, 'agy-provider-protocol');
+  assert.ok(protoBar.props.className.includes('pt-price-mode'));
+  for (const proto of ['openai', 'openai-responses', 'anthropic', 'gemini']) {
+    const btn = ui.find(protoBar, `agy-provider-proto-${proto}`);
+    assert.ok(btn, `Missing protocol button ${proto}`);
+    assert.ok(btn.props.className.includes('pt-price-mode-btn'));
+  }
+
+  // Switch protocol to anthropic & verify Base URL placeholder updates, then to openai-responses
+  ui.find(modal, 'agy-provider-proto-anthropic').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-base-url').props.placeholder, 'https://api.anthropic.com/v1');
+  ui.find(tree, 'agy-provider-proto-gemini').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-base-url').props.placeholder, 'https://generativelanguage.googleapis.com/v1beta');
+  ui.find(tree, 'agy-provider-proto-openai-responses').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-base-url').props.placeholder, 'https://api.openai.com/v1');
+
+  // Fill fields and toggle eye button to reveal/hide API key
+  ui.find(tree, 'agy-provider-name').props.onChange({ target: { value: 'My Relay' } });
+  ui.find(tree, 'agy-provider-base-url').props.onChange({ target: { value: 'https://relay.example.com/v1' } });
+  ui.find(tree, 'agy-provider-api-key').props.onChange({ target: { value: 'sk-live-secret-123' } });
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-api-key').props.type, 'password');
+  assert.equal(ui.find(tree, 'agy-provider-key-toggle').props['aria-pressed'], false);
+  ui.find(tree, 'agy-provider-key-toggle').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-api-key').props.type, 'text');
+  assert.equal(ui.find(tree, 'agy-provider-key-toggle').props['aria-pressed'], true);
+
+  // Fetch models -> searchable picker -> select models & test connection
+  ui.find(tree, 'agy-provider-fetch-models').props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = ui.renderSettings();
+  assert.equal(listModelsCalls.length, 1);
+  assert.equal(listModelsCalls[0].protocol, 'openai-responses');
+  assert.equal(listModelsCalls[0].baseUrl, 'https://relay.example.com/v1');
+  assert.equal(listModelsCalls[0].apiKey, 'sk-live-secret-123');
+  const fetchedList = ui.find(tree, 'agy-provider-fetched-list');
+  assert.ok(fetchedList);
+  ui.find(fetchedList, 'agy-provider-fetched-search').props.onChange({ target: { value: 'gpt' } });
+  tree = ui.renderSettings();
+  ui.find(tree, 'agy-provider-fetched-select-all').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-models').props.value, 'gpt-4o-mini, gpt-4.1');
+
+  // Test connection inside modal
+  ui.find(tree, 'agy-provider-test-conn').props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = ui.renderSettings();
+  assert.equal(testConnCalls.length, 1);
+  assert.equal(testConnCalls[0].model, 'gpt-4o-mini');
+  assert.ok(ui.collectText(ui.find(tree, 'agy-provider-feedback')).includes('128 ms'));
+
+  // Save provider -> modal closes, provider row appears with hostname + model count badge, zero middle dots
+  const modalForm = ui.findAll(ui.find(tree, 'agy-ai-provider-modal'), n => n.type === 'form')[0];
+  modalForm.props.onSubmit({ preventDefault() {} });
+  await new Promise(r => setImmediate(r));
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-ai-provider-modal'), null);
+  const provRow = ui.find(tree, 'agy-ai-provider-row-prov-1');
+  assert.ok(provRow);
+  const provRowText = ui.collectText(provRow);
+  assert.ok(provRowText.includes('My Relay'));
+  assert.ok(provRowText.includes('OpenAI Responses'));
+  assert.ok(provRowText.includes('relay.example.com'));
+  assert.ok(provRowText.includes('2 个模型'));
+  assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(provRowText), false);
+
+  // 5. Edit existing provider pre-fills API key and reveals it on eye toggle
+  ui.find(tree, 'agy-ai-provider-edit-prov-1').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-api-key').props.value, 'sk-live-secret-123');
+  assert.equal(ui.find(tree, 'agy-provider-api-key').props.type, 'password');
+  ui.find(tree, 'agy-provider-key-toggle').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-provider-api-key').props.type, 'text');
+  ui.find(tree, 'agy-provider-cancel').props.onClick();
+  tree = ui.renderSettings();
+  assert.equal(ui.find(tree, 'agy-ai-provider-modal'), null);
+
+  // 6. Unified Model Selection pickers assign "providerId::modelId" and support "Follow default model"
+  const defTrigger = ui.find(tree, 'agy-model-assign-trigger-default');
+  assert.equal(defTrigger.props.disabled, false);
+  defTrigger.props.onClick();
+  tree = ui.renderSettings();
+  const defPicker = ui.find(tree, 'agy-model-assign-picker-default');
+  assert.ok(defPicker);
+  const defOpts = ui.findAll(defPicker, n => n.props?.['data-testid'] === 'agy-model-assign-option-default');
+  assert.equal(defOpts.length, 2);
+  defOpts[0].props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { betaAiModel: 'prov-1::gpt-4o-mini' });
+
+  tree = ui.renderSettings();
+  ui.find(tree, 'agy-model-assign-trigger-translate').props.onClick();
+  tree = ui.renderSettings();
+  const trPicker = ui.find(tree, 'agy-model-assign-picker-translate');
+  assert.ok(ui.find(trPicker, 'agy-model-assign-follow-translate'));
+  const trOpts = ui.findAll(trPicker, n => n.props?.['data-testid'] === 'agy-model-assign-option-translate');
+  trOpts[1].props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { betaAiTranslateModel: 'prov-1::gpt-4.1' });
+
+  // Delete provider updates list cleanly
+  tree = ui.renderSettings();
+  ui.find(tree, 'agy-ai-provider-delete-prov-1').props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = ui.renderSettings();
+  assert.deepEqual(deletedIds, ['prov-1']);
+  assert.ok(ui.find(tree, 'agy-ai-providers-empty'));
+
+  // 7. QuickPopover nested overlay guard protects ai-provider-modal and model-assign-picker
+  for (const selectorMatch of ['[data-testid="agy-ai-provider-modal"]', '[data-testid^="agy-model-assign-picker"]']) {
+    const guardUi = createPanelHarness(null, { enabled: true, titlebarQuickPanel: true }, {
+      Popover: props => ({ type: 'popover', props, children: props.children }),
+      querySelector: sel => (sel.includes(selectorMatch) ? {} : null)
+    });
+    const pop = guardUi.findAll(guardUi.renderQuickPopover(), n => n.type === 'popover')[0];
+    pop.props.onOpenChange(true);
+    let canceled = false;
+    pop.props.onOpenChange(false, { event: { target: { closest: () => null } }, cancel: () => { canceled = true; } });
+    assert.equal(canceled, true, `QuickPopover must stay open when ${selectorMatch} is active`);
+  }
+
+  // 8. QuickPopover tab, Page tab, and Settings category persist across unmount/remount and across localStorage
+  const lsMap = new Map();
+  const mockLs = {
+    getItem: k => (lsMap.has(k) ? lsMap.get(k) : null),
+    setItem: (k, v) => { lsMap.set(k, String(v)); },
+    removeItem: k => { lsMap.delete(k); }
+  };
+  const persistUi = createPanelHarness(null, { enabled: true, titlebarQuickPanel: true, language: 'zh-CN' }, { localStorage: mockLs });
+  // Open QuickPopover -> switch to settings -> switch Settings category to beta
+  persistUi.find(persistUi.renderQuickPopover(), 'agy-titlebar-quick-trigger').props.onClick();
+  persistUi.find(persistUi.renderQuickPopover(), 'agy-quick-tab-settings').props.onClick();
+  let qpTree = persistUi.renderQuickPopover();
+  persistUi.find(qpTree, 'agy-settings-cat-beta').props.onClick();
+  qpTree = persistUi.renderQuickPopover();
+  assert.equal(persistUi.find(qpTree, 'agy-settings-cat-beta').props['aria-selected'], true);
+
+  // Switch Page tab to pricing
+  let pageTree = persistUi.renderPage();
+  persistUi.find(pageTree, 'agy-tab-pricing').props.onClick();
+  assert.equal(lsMap.get('agy_powertools_quick_tab'), 'settings');
+  assert.equal(lsMap.get('agy_powertools_page_tab'), 'pricing');
+  assert.equal(lsMap.get('agy_powertools_settings_cat'), 'beta');
+
+  // Unmount and remount QuickPopover, Settings, and Page in same harness
+  persistUi.unmountComponent('quick-popover');
+  persistUi.unmountComponent('settings');
+  persistUi.unmountComponent('page');
+  persistUi.find(persistUi.renderQuickPopover(), 'agy-titlebar-quick-trigger').props.onClick();
+  qpTree = persistUi.renderQuickPopover();
+  assert.equal(persistUi.find(qpTree, 'agy-quick-tab-settings').props['aria-current'], 'page');
+  assert.equal(persistUi.find(qpTree, 'agy-settings-cat-beta').props['aria-selected'], true);
+  pageTree = persistUi.renderPage();
+  assert.equal(persistUi.find(pageTree, 'agy-tab-pricing').props['aria-current'], 'page');
+
+  // Brand-new harness instance reading from same localStorage also restores all 3 states
+  const freshUi = createPanelHarness(null, { enabled: true, titlebarQuickPanel: true, language: 'zh-CN' }, { localStorage: mockLs });
+  freshUi.find(freshUi.renderQuickPopover(), 'agy-titlebar-quick-trigger').props.onClick();
+  const freshQp = freshUi.renderQuickPopover();
+  assert.equal(freshUi.find(freshQp, 'agy-quick-tab-settings').props['aria-current'], 'page');
+  assert.equal(freshUi.find(freshQp, 'agy-settings-cat-beta').props['aria-selected'], true);
+  assert.equal(freshUi.find(freshUi.renderPage(), 'agy-tab-pricing').props['aria-current'], 'page');
 });

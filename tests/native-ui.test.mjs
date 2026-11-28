@@ -2336,8 +2336,8 @@ test('auto-check update banner shows one-click update/dismiss and optional autoI
   let runningIds = ['busy-conv-1'];
   let remoteReply = {
     status: 'available',
-    version: '2.17.0',
-    releaseUrl: 'https://github.com/WhiteBr1ck/agy-powertools/releases/tag/v2.17.0',
+    version: '2.98.0',
+    releaseUrl: 'https://github.com/WhiteBr1ck/agy-powertools/releases/tag/v2.98.0',
     notes: '## 中文说明\n- **体验优化**：新增低频自动查更新与轻量提醒',
     canInstall: true,
     dismissedVersion: '',
@@ -2406,7 +2406,7 @@ test('auto-check update banner shows one-click update/dismiss and optional autoI
       else if (msg.method === 'update.autoCheck') ctx.__agyPowertoolsReceive(msg.id, { ...remoteReply });
       else if (msg.method === 'update.dismiss') { remoteReply.dismissedVersion = msg.version; ctx.__agyPowertoolsReceive(msg.id, { ...remoteReply }); }
       else if (msg.method === 'update.install') ctx.__agyPowertoolsReceive(msg.id, { status: 'preparing', version: msg.version });
-      else if (msg.method === 'update.status') ctx.__agyPowertoolsReceive(msg.id, { status: 'completed', version: '2.17.0' });
+      else if (msg.method === 'update.status') ctx.__agyPowertoolsReceive(msg.id, { status: 'completed', version: '2.98.0' });
       else ctx.__agyPowertoolsReceive(msg.id, {});
     },
     MutationObserver: class { observe() {} disconnect() {} },
@@ -2443,11 +2443,11 @@ test('auto-check update banner shows one-click update/dismiss and optional autoI
   // Clicking dismiss persists update.dismiss and removes banner
   for (const fn of dismissBtn.listeners.get('click') || []) fn();
   await new Promise(r => setImmediate(r));
-  assert.equal(calls.some(c => c.method === 'update.dismiss' && c.version === '2.17.0'), true);
+  assert.equal(calls.some(c => c.method === 'update.dismiss' && c.version === '2.98.0'), true);
   assert.equal(banner.isConnected, false);
 
   // New version arrives + autoInstallUpdates enabled -> waits while runningIds non-empty, then auto-installs once idle
-  remoteReply = { ...remoteReply, version: '2.18.0', dismissedVersion: '' };
+  remoteReply = { ...remoteReply, version: '2.99.0', dismissedVersion: '' };
   await capturedEnv.change({ autoInstallUpdates: true });
   await capturedEnv.checkForUpdateNotice({ force: true });
   assert.equal(calls.some(c => c.method === 'update.install'), false, 'must wait while a turn is running');
@@ -2457,7 +2457,7 @@ test('auto-check update banner shows one-click update/dismiss and optional autoI
   mainPoll.fn();
   await new Promise(r => setImmediate(r));
   await new Promise(r => setImmediate(r));
-  assert.equal(calls.some(c => c.method === 'update.install' && c.version === '2.18.0'), true);
+  assert.equal(calls.some(c => c.method === 'update.install' && c.version === '2.99.0'), true);
 
   ctx.__agyPowertools.dispose();
 });
@@ -5345,6 +5345,1637 @@ test('QuickPopover keeps full 940px width when space remains on the left and tra
   assert.equal(rootProps.get('--pt-qp-max-w'), '971px');
   panels.dispose();
   assert.equal(rootProps.has('--pt-qp-max-w'), false);
+});
+
+test('Issues #115/#116: muted & icon-only composer indicators (main + subagent), inline composer quota + 268px MD3 wavy popover, independent composerQuotaWindow, and monochrome halo', async () => {
+  const p = page(true);
+  p.context.location.pathname = '/c/conv-115-116';
+  const renderedByKind = new Map();
+  const rootMounts = new Map();
+  let sidebarInsertCalls = 0;
+
+  const makeBox = extra => ({
+    children: [],
+    isConnected: true,
+    firstChild: null,
+    nextSibling: null,
+    parentElement: null,
+    getBoundingClientRect() { return { width: 640, height: 104 }; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    insertBefore(node, before) {
+      if (this === sidebarFooter) sidebarInsertCalls++;
+      const idx = this.children.indexOf(node);
+      if (idx >= 0) this.children.splice(idx, 1);
+      node.isConnected = true;
+      node.parentElement = this;
+      if (before && this.children.includes(before)) this.children.splice(this.children.indexOf(before), 0, node);
+      else this.children.push(node);
+      this.firstChild = this.children[0] || null;
+      for (let i = 0; i < this.children.length; i++) this.children[i].nextSibling = this.children[i + 1] || null;
+    },
+    remove() {
+      if (this.parentElement) {
+        const idx = this.parentElement.children.indexOf(this);
+        if (idx >= 0) this.parentElement.children.splice(idx, 1);
+        this.parentElement.firstChild = this.parentElement.children[0] || null;
+        for (let i = 0; i < this.parentElement.children.length; i++) {
+          this.parentElement.children[i].nextSibling = this.parentElement.children[i + 1] || null;
+        }
+      }
+      this.isConnected = false;
+      this.parentElement = null;
+    },
+    ...extra
+  });
+
+  const mainCard = makeBox({ cid: 'conv-115-116' });
+  const flexRow = makeBox({});
+  const model = makeBox({
+    textContent: 'Gemini 4 Carbon',
+    parentElement: flexRow,
+    closest: sel => sel === '.surface-composer-card' ? mainCard : null
+  });
+  mainCard.querySelector = sel => sel === '[data-testid="model-selector-trigger"]' ? model : null;
+
+  const subLeftRow = makeBox({});
+  const subCard = makeBox({
+    cid: 'sub-115',
+    querySelector: sel => sel.includes('agy-composer-footer') ? subLeftRow : null
+  });
+
+  const sidebarFooter = makeBox({});
+  const settingsBtn = makeBox({ parentElement: sidebarFooter });
+  sidebarFooter.children.push(settingsBtn);
+  sidebarFooter.firstChild = settingsBtn;
+
+  p.document.querySelector = sel => sel === '[data-testid="settings-button"]' ? settingsBtn : null;
+  p.document.querySelectorAll = sel => {
+    if (sel === '[data-testid="model-selector-trigger"]') return [model];
+    if (sel === '.surface-composer-card') return [mainCard, subCard];
+    return [];
+  };
+  p.context.getComputedStyle = el => el === mainCard ? { borderRadius: '20px', display: 'flex' } : { display: 'flex' };
+  p.context.React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    Fragment: 'fragment',
+    useRef: init => ({ current: init }),
+    useId: () => ':r115:',
+    useState: init => [typeof init === 'function' ? init() : init, () => {}],
+    useEffect: fn => { fn(); },
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  p.context.HC = ({ children }) => children;
+  p.context.IC = ({ children }) => children;
+  p.context.JC = ({ children, ...props }) => ({ type: 'div', props, children });
+  p.context.KC = ({ children }) => children;
+  p.context.Uy = 'button';
+  p.context.k0 = 'div';
+  p.context.dq = 'icon';
+  p.context.__agyNativeAdapter.wrap = el => el;
+  p.context.__agyNativeAdapter.composerCascadeId = el => el?.cid || '';
+  const navigated = [];
+  p.context.__agyNativeAdapter.router = () => ({ navigate: arg => navigated.push(arg) });
+  p.context.__agyNativeAdapter.subagents = () => [{ id: 'sub-115', parentId: 'conv-115-116', title: 'Worker', status: 'running', stepCount: 2 }];
+
+  let quotaFractionGemini = 0.88;
+  let quotaFractionGeminiWeekly = 0.42;
+  let quotaFractionClaude = 0.14;
+  p.context.__agyNativeAdapter.service = () => ({
+    retrieveUserQuotaSummary: async () => ({
+      response: {
+        groups: [
+          {
+            displayName: 'Gemini Models',
+            buckets: [
+              { bucketId: 'gemini-5h', window: '5h', remainingFraction: quotaFractionGemini, resetTimeMs: Date.now() + 3_600_000 },
+              { bucketId: 'gemini-weekly', window: 'weekly', remainingFraction: quotaFractionGeminiWeekly, resetTimeMs: Date.now() + 86_400_000 * 2 }
+            ]
+          },
+          {
+            displayName: 'Claude / GPT',
+            buckets: [
+              { bucketId: 'claude-5h', window: '5h', remainingFraction: quotaFractionClaude, resetTimeMs: Date.now() + 1_800_000 }
+            ]
+          }
+        ]
+      }
+    })
+  });
+
+  let ringRenderCount = 0;
+  p.context.ReactDOM = {
+    createRoot(mount) {
+      const kind = mount.dataset?.agyPowertoolsRoot;
+      rootMounts.set(kind, mount);
+      return {
+        render(tree) {
+          renderedByKind.set(kind, tree);
+          if (kind === 'ring') ringRenderCount++;
+        },
+        unmount() {
+          if (rootMounts.get(kind) === mount) rootMounts.delete(kind);
+        }
+      };
+    }
+  };
+
+  let env = null;
+  p.context.__agyNativeAdapter.installPage = () => true;
+  p.context.__agyPanels = value => {
+    env = value;
+    return {
+      Page: () => null,
+      Sidebar: () => null,
+      AccountSwitcher: () => ({ type: 'div', props: { 'data-testid': 'mock-switcher' }, children: [] }),
+      dispose() {}
+    };
+  };
+
+  let curSettings = {
+    enabled: true,
+    language: 'zh-CN',
+    contextRing: true,
+    speedStats: true,
+    composerIndicatorTone: 'semantic',
+    composerIndicatorCompact: false,
+    composerQuota: true,
+    composerQuotaWindow: 'auto',
+    composerQuotaHalo: true,
+    composerQuotaHaloWindow: 'auto',
+    composerQuotaHaloTone: 'semantic',
+    multiAccount: true,
+    accountSwitcher: true,
+    subagentTelemetry: true
+  };
+  const makeState = () => ({
+    conversationId: 'conv-115-116',
+    stateRev: 1,
+    settings: { ...curSettings },
+    contextWindow: { usedPercent: 88, usedTokens: 88000, maxTokens: 100000, categories: [] },
+    telemetry: { turnCount: 1, stepCount: 3, totalTokens: 90000, latestTps: 78, tps: 78, requestCount: 1, errorCount: 0, toolCount: 1 },
+    progress: { status: 'complete', tasks: [] },
+    turns: [],
+    requests: []
+  });
+
+  p.context.__agyInitialSettings = { ...curSettings };
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    queueMicrotask(() => {
+      if (req.method === 'settings.get') p.context.__agyPowertoolsReceive(req.id, { ...curSettings });
+      else if (req.method === 'settings.set') { curSettings = { ...curSettings, ...req.settings }; p.context.__agyPowertoolsReceive(req.id, { ...curSettings }); }
+      else if (req.method === 'state') p.context.__agyPowertoolsReceive(req.id, makeState());
+      else if (req.method === 'subagents.stats') {
+        p.context.__agyPowertoolsReceive(req.id, {
+          items: {
+            'sub-115': {
+              conversationId: 'sub-115',
+              modelName: 'Gemini 4 Flash',
+              shortModel: 'Flash',
+              contextWindow: { usedPercent: 96, usedTokens: 96000, maxTokens: 100000, categories: [] },
+              telemetry: { totalTokens: 96000, tps: 84, latestTps: 84, requestCount: 1, errorCount: 0, toolCount: 1 }
+            }
+          }
+        });
+      } else {
+        p.context.__agyPowertoolsReceive(req.id, {});
+      }
+    });
+  };
+
+  vm.runInContext(source, p.context);
+  await new Promise(r => setTimeout(r, 40));
+
+  const renderTree = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(renderTree);
+    if (typeof node.type === 'function') {
+      const states = [];
+      let idx = 0;
+      const prevState = p.context.React.useState;
+      const prevEffect = p.context.React.useEffect;
+      p.context.React.useState = init => {
+        const i = idx++;
+        if (!(i in states)) states[i] = typeof init === 'function' ? init() : init;
+        return [states[i], v => { states[i] = typeof v === 'function' ? v(states[i]) : v; }];
+      };
+      p.context.React.useEffect = fn => { fn(); };
+      try {
+        let out = node.type({ ...node.props, children: node.children });
+        idx = 0;
+        p.context.React.useEffect = () => {};
+        out = node.type({ ...node.props, children: node.children });
+        return renderTree(out);
+      } finally {
+        p.context.React.useState = prevState;
+        p.context.React.useEffect = prevEffect;
+      }
+    }
+    return { ...node, children: (Array.isArray(node.children) ? node.children : [node.children]).map(renderTree) };
+  };
+  const findById = (node, id) => {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const x of node) { const r = findById(x, id); if (r) return r; } return null; }
+    if (node.props?.['data-testid'] === id) return node;
+    return findById(node.children, id);
+  };
+  const findAll = (node, pred, out = []) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const x of node) findAll(x, pred, out); return out; }
+    if (pred(node)) out.push(node);
+    findAll(node.children, pred, out);
+    return out;
+  };
+  const collectText = node => {
+    if (node == null || typeof node === 'boolean') return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(collectText).join(' ');
+    return collectText(node.children);
+  };
+
+  // 1. Semantic mode: bright warning/success colors on main + subagent triggers, auto window picks lower weekly 42% (warning amber)
+  let mainTree = renderTree(renderedByKind.get('ring'));
+  let subTree = renderTree(renderedByKind.get('subagent-composer'));
+  let haloTree = renderTree(renderedByKind.get('quota-halo'));
+  assert.equal(findById(mainTree, 'agy-context-ring-trigger').props.style.color, 'var(--warning)');
+  assert.equal(findById(mainTree, 'agy-speed-stats-trigger').props.style.color, 'var(--success)');
+  const quotaTrigger = findById(mainTree, 'agy-composer-quota-trigger');
+  assert.ok(quotaTrigger);
+  assert.equal(quotaTrigger.props['data-window'], 'weekly');
+  assert.equal(quotaTrigger.props['data-percent'], '42');
+  assert.equal(quotaTrigger.props.style.color, 'var(--warning)');
+  assert.ok(collectText(quotaTrigger).includes('42%'));
+  assert.equal(findAll(mainTree, n => String(n.props?.className || '').includes('agy-composer-label')).length, 3);
+
+  // Popover renders 268px MD3 Expressive wavy bar layout (no 当前 pill, 13px group headers > sub-rows, wavy SVG bars, sleek ghost link footer)
+  const quotaPop = findById(mainTree, 'agy-composer-quota-popover');
+  assert.ok(quotaPop);
+  assert.match(String(quotaPop.props.className || ''), /!w-\[268px\]/);
+  const densityCss = p.nodes.find(el => el.dataset?.agyDensityStyle === '')?.textContent || '';
+  assert.match(densityCss, /\[data-testid="agy-composer-quota-popover"\]\{width:268px!important\}/);
+  const popText = collectText(quotaPop);
+  assert.ok(popText.includes('Gemini'));
+  assert.ok(popText.includes('88%'));
+  assert.ok(popText.includes('42%'));
+  assert.ok(popText.includes('Claude/GPT'));
+  assert.ok(popText.includes('14%'));
+  assert.equal(popText.includes('当前'), false, 'ComposerQuotaDetails must not show loud 当前 pill badge');
+  assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(popText), false);
+  const group0 = findById(quotaPop, 'agy-composer-quota-group-0');
+  const group1 = findById(quotaPop, 'agy-composer-quota-group-1');
+  assert.equal(group0.props['data-active'], 'true');
+  assert.equal(group1.props['data-active'], undefined);
+  const title0 = findById(group0, 'agy-composer-quota-group-title-0');
+  const title1 = findById(group1, 'agy-composer-quota-group-title-1');
+  assert.equal(title0.props.style.fontSize, 13);
+  assert.equal(title0.props.style.fontWeight, 'var(--agy-fw-semibold, 600)');
+  assert.equal(title0.props.style.color, 'var(--foreground)');
+  assert.equal(title1.props.style.fontSize, 13);
+  assert.equal(title1.props.style.color, 'color-mix(in srgb, var(--foreground) 84%, transparent)');
+  const activeDot = findAll(group0, n => String(n.props?.className || '').includes('w-1.5 h-1.5 rounded-full'))[0];
+  const inactiveDot = findAll(group1, n => String(n.props?.className || '').includes('w-1.5 h-1.5 rounded-full'))[0];
+  assert.equal(activeDot.props.style.background, 'var(--primary)');
+  assert.equal(inactiveDot.props.style.background, 'color-mix(in srgb, var(--muted-foreground) 45%, transparent)');
+  const wavyBars = findAll(quotaPop, n => n.props?.['data-testid'] === 'agy-md3-wavy-bar');
+  assert.equal(wavyBars.length, 3);
+  for (const bar of wavyBars) {
+    assert.equal(bar.type, 'svg');
+    assert.equal(bar.props.viewBox, '0 0 236 10');
+    assert.equal(bar.props.height, 10);
+    const paths = findAll(bar, n => n.type === 'path');
+    const lines = findAll(bar, n => n.type === 'line');
+    const circles = findAll(bar, n => n.type === 'circle');
+    assert.equal(paths.length, 1, 'partial quota must render active wavy path');
+    assert.equal(lines.length, 1, 'partial quota must render inactive track line');
+    assert.equal(circles.length, 1, 'partial quota (<97%) must render stop dot circle');
+    assert.equal(paths[0].props.strokeWidth, 3);
+    assert.equal(paths[0].props.strokeLinecap, 'round');
+    assert.equal(circles[0].props.cx, 234.5);
+    assert.equal(circles[0].props.r, 1.5);
+  }
+  assert.equal(findAll(wavyBars[0], n => n.type === 'path')[0].props.stroke, 'var(--primary)');
+  assert.equal(findAll(wavyBars[2], n => n.type === 'path')[0].props.stroke, 'var(--warning)');
+  const openTabBtn = findById(quotaPop, 'agy-composer-quota-open-tab');
+  assert.equal(openTabBtn.type, 'button');
+  assert.equal(openTabBtn.props.variant, undefined, 'Footer link must be sleek ghost link button, not secondary block button');
+  assert.match(String(openTabBtn.props.className || ''), /justify-between/);
+  assert.equal(findAll(openTabBtn, n => n.type === 'svg').length, 1);
+  openTabBtn.props.onClick();
+  assert.deepEqual(JSON.parse(JSON.stringify(navigated)), [{ to: '/powertools' }]);
+
+  // Subagent semantic colors
+  assert.equal(findById(subTree, 'agy-subagent-context-ring-trigger').props.style.color, 'var(--error)');
+  const subSpeedTrigger = findById(subTree, 'agy-subagent-speed-stats-trigger');
+  assert.equal(subSpeedTrigger.children[0].props.style.color, 'var(--success)');
+  assert.equal(findAll(subTree, n => String(n.props?.className || '').includes('agy-composer-label')).length, 2);
+
+  // Semantic halo uses linearGradient with amber stop
+  const semHalo = findById(haloTree, 'agy-composer-quota-halo');
+  assert.equal(semHalo.props['data-halo-tone'], 'semantic');
+  assert.ok(findAll(semHalo, n => n.type === 'linearGradient').length === 1);
+
+  // Sidebar footer mounts only AccountSwitcher above settingsBtn (no sidebar quota strip) with zero insertBefore ping-pong
+  assert.deepEqual(
+    sidebarFooter.children.map(c => c.dataset?.agyPowertoolsRoot || 'settings-btn'),
+    ['account-switcher', 'settings-btn']
+  );
+  const insertsBeforeStableRefresh = sidebarInsertCalls;
+  await env.refreshState();
+  assert.equal(sidebarInsertCalls, insertsBeforeStableRefresh, 'account-switcher must not ping-pong insertBefore');
+
+  // 2. Muted + Compact mode + Monochrome halo + independent composerQuotaWindow (5h) vs composerQuotaHaloWindow (weekly)
+  const rendersBeforeTone = ringRenderCount;
+  await env.change({ composerIndicatorTone: 'muted', composerIndicatorCompact: true, composerQuotaWindow: '5h', composerQuotaHaloWindow: 'weekly', composerQuotaHaloTone: 'monochrome' });
+  assert.ok(ringRenderCount > rendersBeforeTone, 'composerRingSig must re-render NativeEntry on tone/compact/window change');
+
+  mainTree = renderTree(renderedByKind.get('ring'));
+  subTree = renderTree(renderedByKind.get('subagent-composer'));
+  haloTree = renderTree(renderedByKind.get('quota-halo'));
+
+  // Main composer triggers: muted gray (color undefined), icon-only (size: 'icon', 0 .agy-composer-label spans), composerQuotaWindow='5h' -> 88%
+  for (const id of ['agy-context-ring-trigger', 'agy-speed-stats-trigger', 'agy-composer-quota-trigger']) {
+    const btn = findById(mainTree, id);
+    assert.ok(btn, `Expected ${id}`);
+    assert.equal(btn.props.style.color, undefined, `${id} must suppress bright color in muted mode`);
+    assert.equal(btn.props.size, 'icon', `${id} must use compact icon size when composerIndicatorCompact is true`);
+    assert.equal(btn.props['data-indicator-tone'], 'muted');
+    assert.equal(btn.props['data-indicator-compact'], 'true');
+  }
+  assert.equal(findById(mainTree, 'agy-composer-quota-trigger').props['data-window'], '5h');
+  assert.equal(findById(mainTree, 'agy-composer-quota-trigger').props['data-percent'], '88');
+  assert.equal(findAll(mainTree, n => String(n.props?.className || '').includes('agy-composer-label')).length, 0);
+
+  // Subagent composer triggers: muted gray + icon-only
+  const subCtx = findById(subTree, 'agy-subagent-context-ring-trigger');
+  const subSpd = findById(subTree, 'agy-subagent-speed-stats-trigger');
+  assert.equal(subCtx.props.style.color, undefined);
+  assert.equal(subCtx.props.size, 'icon');
+  assert.equal(subSpd.children[0].props.style.color, undefined);
+  assert.equal(subSpd.props.size, 'icon');
+  assert.equal(findAll(subTree, n => String(n.props?.className || '').includes('agy-composer-label')).length, 0);
+
+  // Monochrome halo stays on composerQuotaHaloWindow='weekly' (42%) independently of composerQuotaWindow='5h' (88%)
+  const monoHalo = findById(haloTree, 'agy-composer-quota-halo');
+  assert.equal(monoHalo.props['data-halo-tone'], 'monochrome');
+  assert.equal(monoHalo.props['data-window'], 'weekly');
+  assert.equal(monoHalo.props['data-percent'], '42');
+  assert.equal(findAll(monoHalo, n => n.type === 'linearGradient').length, 0);
+  const strokePath = findAll(monoHalo, n => n.props?.className === 'agy-quota-halo-stroke')[0];
+  assert.equal(strokePath.props.stroke, 'color-mix(in srgb, var(--foreground) 38%, transparent)');
+
+  // Swapping windows updates each surface independently
+  const rendersBeforeSwap = ringRenderCount;
+  await env.change({ composerQuotaWindow: 'weekly', composerQuotaHaloWindow: '5h' });
+  assert.ok(ringRenderCount > rendersBeforeSwap, 'composerRingSig must re-render on composerQuotaWindow change');
+  mainTree = renderTree(renderedByKind.get('ring'));
+  haloTree = renderTree(renderedByKind.get('quota-halo'));
+  assert.equal(findById(mainTree, 'agy-composer-quota-trigger').props['data-window'], 'weekly');
+  assert.equal(findById(mainTree, 'agy-composer-quota-trigger').props['data-percent'], '42');
+  assert.equal(findById(haloTree, 'agy-composer-quota-halo').props['data-window'], '5h');
+  assert.equal(findById(haloTree, 'agy-composer-quota-halo').props['data-percent'], '88');
+
+  // 3. Responsive @container input-footer CSS rules cover agy-composer-quota-trigger, and NativeEntry has no useRevision() (Issue #89)
+  assert.match(source, /@container input-footer \(max-width: 500px\)[\s\S]*agy-composer-quota-trigger/);
+  assert.match(source, /@container input-footer \(max-width: 240px\)[\s\S]*agy-composer-quota-trigger/);
+  const nativeEntrySrc = source.slice(source.indexOf('function NativeEntry('), source.indexOf('function ToolDetails('));
+  assert.equal(nativeEntrySrc.includes('useRevision'), false, 'NativeEntry must not call useRevision() to preserve Issue #89 IME guard');
+
+  // 4. Single-account mode unmounts AccountSwitcher cleanly leaving only settings-btn
+  await env.change({ multiAccount: false });
+  assert.equal(rootMounts.has('account-switcher'), false);
+  assert.deepEqual(
+    sidebarFooter.children.filter(c => c.isConnected).map(c => c.dataset?.agyPowertoolsRoot || 'settings-btn'),
+    ['settings-btn']
+  );
+
+  p.context.__agyPowertools.dispose();
+});
+
+test('ComposerQuotaDetails MD3 wavy bars cover 0%, 1%, partial active/inactive, and 100% states with clean hierarchy', async () => {
+  const p = page(true);
+  p.context.location.pathname = '/c/conv-md3-wavy';
+  let ringTree = null;
+  const makeBox = extra => ({
+    children: [],
+    isConnected: true,
+    firstChild: null,
+    nextSibling: null,
+    parentElement: null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    insertBefore(node) { node.isConnected = true; this.children.push(node); },
+    remove() { this.isConnected = false; },
+    ...extra
+  });
+  const card = makeBox({ cid: 'conv-md3-wavy' });
+  const flexRow = makeBox({});
+  const model = makeBox({
+    textContent: 'Gemini 4 Pro',
+    parentElement: flexRow,
+    closest: sel => sel === '.surface-composer-card' ? card : null
+  });
+  card.querySelector = sel => sel === '[data-testid="model-selector-trigger"]' ? model : null;
+  p.document.querySelectorAll = sel => sel === '[data-testid="model-selector-trigger"]' ? [model] : [];
+  p.context.getComputedStyle = () => ({ display: 'flex' });
+  p.context.React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    Fragment: 'fragment',
+    useState: init => [typeof init === 'function' ? init() : init, () => {}],
+    useEffect: fn => { fn(); },
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  p.context.HC = ({ children }) => children;
+  p.context.IC = ({ children }) => children;
+  p.context.JC = ({ children, ...props }) => ({ type: 'div', props, children });
+  p.context.KC = ({ children }) => children;
+  p.context.Uy = 'button';
+  p.context.dq = 'icon';
+  p.context.__agyNativeAdapter.wrap = el => el;
+  p.context.__agyNativeAdapter.composerCascadeId = el => el?.cid || '';
+  p.context.__agyNativeAdapter.service = () => ({
+    retrieveUserQuotaSummary: async () => ({
+      response: {
+        groups: [
+          {
+            displayName: 'Gemini Models',
+            buckets: [
+              { bucketId: 'g-5h', window: '5h', remainingFraction: 0.87, resetTimeMs: Date.now() + 4_020_000 },
+              { bucketId: 'g-wk', window: 'weekly', remainingFraction: 0.09, resetTimeMs: Date.now() + 86_400_000 * 5 }
+            ]
+          },
+          {
+            displayName: 'Claude / GPT',
+            buckets: [
+              { bucketId: 'c-5h', window: '5h', remainingFraction: 1.0, resetTimeMs: null },
+              { bucketId: 'c-wk', window: 'weekly', remainingFraction: 0.0, resetTimeMs: Date.now() + 86_400_000 }
+            ]
+          },
+          {
+            displayName: 'Argon',
+            buckets: [
+              { bucketId: 'a-5h', window: '5h', remainingFraction: 0.01, resetTimeMs: Date.now() + 3_600_000 }
+            ]
+          }
+        ]
+      }
+    })
+  });
+  p.context.ReactDOM = {
+    createRoot(mount) {
+      return {
+        render(tree) { if (mount.dataset?.agyPowertoolsRoot === 'ring') ringTree = tree; },
+        unmount() {}
+      };
+    }
+  };
+  const settings = { enabled: true, language: 'zh-CN', composerQuota: true, composerQuotaWindow: 'auto', contextRing: false, speedStats: false };
+  p.context.__agyInitialSettings = { ...settings };
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    queueMicrotask(() => {
+      if (req.method === 'settings.get') p.context.__agyPowertoolsReceive(req.id, { ...settings });
+      else if (req.method === 'state') p.context.__agyPowertoolsReceive(req.id, { conversationId: 'conv-md3-wavy', contextWindow: { usedPercent: 10, usedTokens: 1000, maxTokens: 10000, categories: [] }, telemetry: {}, turns: [], requests: [] });
+      else p.context.__agyPowertoolsReceive(req.id, {});
+    });
+  };
+  vm.runInContext(source, p.context);
+  await new Promise(r => setTimeout(r, 40));
+
+  const renderTree = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(renderTree);
+    if (typeof node.type === 'function') return renderTree(node.type({ ...node.props, children: node.children }));
+    return { ...node, children: (Array.isArray(node.children) ? node.children : [node.children]).map(renderTree) };
+  };
+  const findAll = (node, pred, out = []) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const x of node) findAll(x, pred, out); return out; }
+    if (pred(node)) out.push(node);
+    findAll(node.children, pred, out);
+    return out;
+  };
+  const findById = (node, id) => findAll(node, n => n.props?.['data-testid'] === id)[0] || null;
+  const collectText = node => {
+    if (node == null || typeof node === 'boolean') return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(collectText).join(' ');
+    return collectText(node.children);
+  };
+
+  const tree = renderTree(ringTree);
+  const pop = findById(tree, 'agy-composer-quota-popover');
+  assert.ok(pop);
+  assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(collectText(pop)), false);
+
+  // Typography hierarchy: 13px group titles > 12px percentages > 11.5px window labels > 11px countdowns
+  const title0 = findById(pop, 'agy-composer-quota-group-title-0');
+  assert.equal(title0.props.style.fontSize, 13);
+  const g5h = findById(pop, 'agy-composer-quota-bucket-0-5h');
+  const g5hSpans = findAll(g5h, n => n.type === 'span' && n.props?.style?.fontSize != null);
+  assert.deepEqual(g5hSpans.map(s => s.props.style.fontSize), [11.5, 11, 12]);
+  assert.equal(g5hSpans[2].props.style.color, 'var(--foreground)');
+
+  // 87% active pool -> wavy path + inactive line + stop dot
+  const bar87 = findAll(g5h, n => n.props?.['data-testid'] === 'agy-md3-wavy-bar')[0];
+  assert.equal(findAll(bar87, n => n.type === 'path').length, 1);
+  assert.equal(findAll(bar87, n => n.type === 'line').length, 1);
+  assert.equal(findAll(bar87, n => n.type === 'circle').length, 1);
+  assert.equal(findAll(bar87, n => n.type === 'path')[0].props.stroke, 'var(--primary)');
+
+  // 9% critical -> red error color on pct and wavy bar
+  const gWk = findById(pop, 'agy-composer-quota-bucket-0-weekly');
+  const bar9 = findAll(gWk, n => n.props?.['data-testid'] === 'agy-md3-wavy-bar')[0];
+  assert.equal(findAll(bar9, n => n.type === 'path')[0].props.stroke, 'var(--error)');
+
+  // 100% inactive pool -> full wavy path to 234.50, slate-blue mix color, NO inactive gap line, NO stop dot
+  const c5h = findById(pop, 'agy-composer-quota-bucket-1-5h');
+  const bar100 = findAll(c5h, n => n.props?.['data-testid'] === 'agy-md3-wavy-bar')[0];
+  const path100 = findAll(bar100, n => n.type === 'path');
+  assert.equal(path100.length, 1);
+  assert.match(path100[0].props.d, /L 234\.50 /);
+  assert.equal(path100[0].props.stroke, 'color-mix(in srgb, var(--primary) 52%, var(--muted-foreground))');
+  assert.equal(findAll(bar100, n => n.type === 'line').length, 0);
+  assert.equal(findAll(bar100, n => n.type === 'circle').length, 0);
+
+  // 0% empty -> omits active path, full straight inactive track from 1.5 to 234.5 + stop dot
+  const cWk = findById(pop, 'agy-composer-quota-bucket-1-weekly');
+  const bar0 = findAll(cWk, n => n.props?.['data-testid'] === 'agy-md3-wavy-bar')[0];
+  assert.equal(findAll(bar0, n => n.type === 'path').length, 0);
+  const line0 = findAll(bar0, n => n.type === 'line');
+  assert.equal(line0.length, 1);
+  assert.equal(line0[0].props.x1, 1.5);
+  assert.equal(line0[0].props.x2, 234.5);
+  assert.equal(findAll(bar0, n => n.type === 'circle').length, 1);
+
+  // 1% tiny -> short straight active path + inactive line + stop dot
+  const a5h = findById(pop, 'agy-composer-quota-bucket-2-5h');
+  const bar1 = findAll(a5h, n => n.props?.['data-testid'] === 'agy-md3-wavy-bar')[0];
+  const path1 = findAll(bar1, n => n.type === 'path');
+  assert.equal(path1.length, 1);
+  assert.match(path1[0].props.d, /^M 1\.5 5 L 3\.83 5$/);
+  assert.equal(findAll(bar1, n => n.type === 'line').length, 1);
+  assert.equal(findAll(bar1, n => n.type === 'circle').length, 1);
+
+  p.context.__agyPowertools.dispose();
+});
+
+test('Issue #114: pinOverview keeps Overview docked in narrow windows, mounts inline header Pin button, and cleans up cleanly', async () => {
+  const p = page(true);
+  let fakeNow = 10_000;
+  const origDateNow = Date.now;
+  const scheduledTimers = [];
+  let timerSeq = 1;
+  const winResizeListeners = new Set();
+  const rootMounts = new Map();
+  const renderedByKind = new Map();
+  let env = null;
+  let stored = { enabled: true, pinOverview: false, keepTurnOutline: true, keepOverviewOpen: true, language: 'zh-CN' };
+
+  const headerFlex = {
+    isConnected: true,
+    children: [],
+    insertCount: 0,
+    syncSiblings() {
+      for (let i = 0; i < this.children.length; i++) {
+        this.children[i].parentElement = this;
+        this.children[i].nextSibling = this.children[i + 1] || null;
+      }
+    },
+    insertBefore(child, before) {
+      this.insertCount++;
+      const existing = this.children.indexOf(child);
+      if (existing >= 0) this.children.splice(existing, 1);
+      child.isConnected = true;
+      const origRemove = child.remove;
+      child.remove = () => {
+        const idx = this.children.indexOf(child);
+        if (idx >= 0) this.children.splice(idx, 1);
+        this.syncSiblings();
+        origRemove?.call(child);
+      };
+      const idx = before ? this.children.indexOf(before) : -1;
+      if (idx >= 0) this.children.splice(idx, 0, child);
+      else this.children.push(child);
+      this.syncSiblings();
+    }
+  };
+  const customizeTrigger = {
+    isConnected: true,
+    parentElement: headerFlex,
+    dataset: {},
+    getAttribute: k => k === 'data-testid' ? 'overview-panel-customize-trigger' : null
+  };
+  headerFlex.children.push(customizeTrigger);
+  headerFlex.syncSiblings();
+
+  let overviewPresent = true;
+  const overviewPanel = {
+    isConnected: true,
+    querySelector: sel => sel === '[data-testid="overview-panel-customize-trigger"]' ? customizeTrigger : null
+  };
+
+  let ovCalls = [];
+  let overlayCalls = [];
+  let toggleCalls = 0;
+  let ovState = {
+    cascadeId: 'conv-pin-1',
+    presentation: 'panel',
+    breakpoint: 'small',
+    hasContent: true,
+    hydrated: true,
+    isOpen: true,
+    overlayOpen: false,
+    isPanelVisible: false,
+    setBreakpoint(bp, id) {
+      ovCalls.push({ bp, id });
+      ovState.breakpoint = bp;
+      ovState.isPanelVisible = bp !== 'small' && ovState.isOpen;
+    },
+    setOverlayOpen(v) {
+      overlayCalls.push(v);
+      ovState.overlayOpen = v;
+    },
+    setDropdownOpen() {},
+    togglePanel() {
+      toggleCalls++;
+      ovState.isOpen = !ovState.isOpen;
+      ovState.isPanelVisible = ovState.isOpen && ovState.breakpoint !== 'small';
+    }
+  };
+
+  p.context.Date = class MockDate extends Date {
+    static now() { return fakeNow; }
+  };
+  p.context.setTimeout = (cb, delay) => {
+    const id = timerSeq++;
+    scheduledTimers.push({ id, cb, delay, cleared: false });
+    return id;
+  };
+  p.context.clearTimeout = id => {
+    const item = scheduledTimers.find(t => t.id === id);
+    if (item) item.cleared = true;
+  };
+  p.context.window = {
+    addEventListener(type, fn, opts) {
+      if (type !== 'resize') return;
+      winResizeListeners.add(fn);
+      opts?.signal?.addEventListener?.('abort', () => winResizeListeners.delete(fn), { once: true });
+    },
+    removeEventListener(type, fn) {
+      if (type === 'resize') winResizeListeners.delete(fn);
+    }
+  };
+  p.context.location = { pathname: '/c/conv-pin-1' };
+  p.context.React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    Fragment: 'fragment',
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  p.context.ReactDOM = {
+    createRoot(mount) {
+      const kind = mount.dataset?.agyPowertoolsRoot || '';
+      rootMounts.set(kind, mount);
+      return {
+        render(el) { renderedByKind.set(kind, el); },
+        unmount() { rootMounts.delete(kind); renderedByKind.delete(kind); }
+      };
+    }
+  };
+  p.context.__agyPanels = value => { env = value; return { Page: () => null, Sidebar: () => null, dispose() {} }; };
+  p.context.__agyNativeAdapter = {
+    wrap: el => el,
+    installPage: () => true,
+    overview: () => ovState,
+    dispose() {}
+  };
+  p.context.__agyInitialSettings = { ...stored };
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    if (req.method === 'settings.set') {
+      stored = { ...stored, ...req.settings };
+      queueMicrotask(() => p.context.__agyPowertoolsReceive(req.id, { ...stored }));
+      return;
+    }
+    if (req.method === 'settings.get') {
+      queueMicrotask(() => p.context.__agyPowertoolsReceive(req.id, { ...stored }));
+      return;
+    }
+    queueMicrotask(() => p.context.__agyPowertoolsReceive(req.id, {}));
+  };
+  p.document.querySelector = sel => (sel === '[data-testid="overview-panel"]' && overviewPresent) ? overviewPanel : null;
+
+  const renderTree = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(renderTree);
+    if (typeof node.type === 'function') return renderTree(node.type({ ...node.props, children: node.children }));
+    return { ...node, children: (Array.isArray(node.children) ? node.children : [node.children]).map(renderTree) };
+  };
+  const findById = (node, id) => {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const x of node) { const r = findById(x, id); if (r) return r; } return null; }
+    if (node.props?.['data-testid'] === id) return node;
+    return findById(node.children, id);
+  };
+  const findAll = (node, pred, out = []) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const x of node) findAll(x, pred, out); return out; }
+    if (pred(node)) out.push(node);
+    findAll(node.children, pred, out);
+    return out;
+  };
+
+  try {
+    vm.runInContext(source, p.context);
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+
+    // 1. Narrow-viewport CSS and keepTurnOutline CSS are installed in densityStyle
+    const densityCss = p.nodes.find(el => el.dataset?.agyDensityStyle === '')?.textContent || '';
+    assert.match(densityCss, /@media \(max-width: 1120px\)\{[\s\S]*html\[data-agy-pin-overview\] \[data-testid="overview-panel-host"\][^\{]*\{--overview-panel-reserve:clamp\(220px,28vw,320px\)!important\}/);
+    assert.match(densityCss, /@media \(max-width: 1120px\)\{[\s\S]*html\[data-agy-pin-overview\] \[data-testid="overview-panel-host-sibling"\]\{width:clamp\(220px,28vw,320px\)!important;max-width:clamp\(220px,28vw,320px\)!important\}/);
+    assert.match(densityCss, /html\[data-agy-keep-outline\]\[data-agy-pin-overview\] \[data-testid="overview-panel-host"\][^\{]*\{--conversation-nav-reserve:3\.5rem\}/);
+
+    // 2. Default state: pinOverview=false -> attribute off, breakpoint stays 'small', inline pin button mounted directly before customize trigger
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), false);
+    assert.equal(ovCalls.length, 0);
+    assert.equal(ovState.breakpoint, 'small');
+    assert.deepEqual(
+      headerFlex.children.map(c => c.dataset?.agyPowertoolsRoot || 'customize-trigger'),
+      ['overview-pin', 'customize-trigger']
+    );
+    const insertsAfterInit = headerFlex.insertCount;
+    assert.equal(insertsAfterInit, 1);
+
+    // Inspect unpinned button: inline outline SVG push-pin icon, native monochrome muted style, aria-pressed=false, left tooltip
+    let pinTree = renderTree(renderedByKind.get('overview-pin'));
+    let pinBtn = findById(pinTree, 'agy-overview-pin-btn');
+    assert.ok(pinBtn);
+    assert.equal(pinBtn.props['aria-pressed'], false);
+    assert.equal(pinBtn.props['data-pt-tip'], '固定概览面板（窄窗口不自动隐藏）');
+    assert.equal(pinBtn.props['aria-label'], '固定概览面板（窄窗口不自动隐藏）');
+    assert.equal(pinBtn.props['data-pt-tip-place'], 'left');
+    assert.equal(pinBtn.props.style?.color, 'var(--muted-foreground)');
+    assert.equal(pinBtn.props.style?.background, 'transparent');
+    assert.equal(pinBtn.props.style?.opacity, 0.55);
+    const svgs = findAll(pinBtn, n => n.type === 'svg');
+    assert.equal(svgs.length, 1);
+    assert.equal(svgs[0].props.fill, 'none');
+    assert.equal(svgs[0].props.strokeWidth, 1.5);
+    assert.ok(findAll(svgs[0], n => n.type === 'path').length >= 2);
+    assert.doesNotMatch(densityCss, /\.agy-overview-pin-btn[^\n]*var\(--primary\)/);
+
+    // 3. Clicking the Pin button toggles pinOverview=true, sets data-agy-pin-overview, promotes breakpoint -> 'medium', closes overlay if open
+    ovState.overlayOpen = true;
+    pinBtn.props.onClick({ stopPropagation() {} });
+    await new Promise(r => setImmediate(r));
+    await new Promise(r => setImmediate(r));
+
+    assert.equal(stored.pinOverview, true);
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), true);
+    assert.deepEqual(ovCalls, [{ bp: 'medium', id: 'conv-pin-1' }]);
+    assert.deepEqual(overlayCalls, [false]);
+    assert.equal(ovState.breakpoint, 'medium');
+    assert.equal(ovState.overlayOpen, false);
+
+    // Zero insertBefore ping-pong after toggle + repeated mounts; pinned uses solid monochrome ink without blue box
+    assert.equal(headerFlex.insertCount, insertsAfterInit);
+    pinTree = renderTree(renderedByKind.get('overview-pin'));
+    pinBtn = findById(pinTree, 'agy-overview-pin-btn');
+    assert.equal(pinBtn.props['aria-pressed'], true);
+    assert.equal(pinBtn.props['data-pt-tip'], '取消固定概览面板');
+    assert.equal(pinBtn.props['aria-label'], '取消固定概览面板');
+    assert.equal(pinBtn.props.style?.color, 'var(--foreground)');
+    assert.equal(pinBtn.props.style?.background, 'transparent');
+    assert.equal(pinBtn.props.style?.opacity, 0.85);
+    const pinnedSvg = findAll(pinBtn, n => n.type === 'svg')[0];
+    assert.equal(pinnedSvg.props.fill, 'currentColor');
+    assert.equal(pinnedSvg.props.strokeWidth, 1.2);
+
+    // 4. Resize listener promotes narrow breakpoint back to 'medium' and obeys tight-loop throttle (<60ms)
+    assert.equal(winResizeListeners.size, 1);
+    ovState.breakpoint = 'small';
+    // Within 60ms for same (cascadeId, breakpoint) -> throttled
+    fakeNow += 20;
+    for (const fn of winResizeListeners) fn();
+    assert.equal(ovCalls.length, 1);
+    // Advance > 80ms -> leading resize promotes immediately
+    fakeNow += 100;
+    for (const fn of winResizeListeners) fn();
+    assert.equal(ovCalls.length, 2);
+    assert.deepEqual(ovCalls.at(-1), { bp: 'medium', id: 'conv-pin-1' });
+    // Trailing timer catches delayed ResizeObserver flip to 'small'
+    ovState.breakpoint = 'small';
+    fakeNow += 150;
+    for (const t of [...scheduledTimers]) {
+      if (!t.cleared && t.delay === 140) { t.cleared = true; t.cb(); }
+    }
+    assert.equal(ovCalls.length, 3);
+    assert.equal(ovState.breakpoint, 'medium');
+
+    // 5. Promotes even when Antigravity 2.35.2 transiently reports isOpen=false/hasContent=false at 'small',
+    //    but respects hostMounted === false, presentation === 'dropdown', and explicit user close
+    fakeNow += 200;
+    ovState.isOpen = false;
+    ovState.hasContent = false;
+    ovState.breakpoint = 'small';
+    ovState.isPanelVisible = false;
+    for (const fn of winResizeListeners) fn();
+    assert.equal(ovCalls.length, 4);
+    assert.equal(ovState.breakpoint, 'medium');
+
+    fakeNow += 200;
+    ovState.breakpoint = 'small';
+    ovState.hostMounted = false;
+    for (const fn of winResizeListeners) fn();
+    assert.equal(ovCalls.length, 4);
+    assert.equal(toggleCalls, 0);
+
+    fakeNow += 200;
+    ovState.hostMounted = true;
+    ovState.isOpen = true;
+    ovState.hasContent = true;
+    ovState.presentation = 'dropdown';
+    for (const fn of winResizeListeners) fn();
+    assert.equal(ovCalls.length, 4);
+
+    // 6. English tooltips & no ping-pong on language switch
+    ovState.presentation = 'panel';
+    await env.change({ language: 'en' });
+    assert.equal(headerFlex.insertCount, insertsAfterInit);
+    pinBtn = findById(renderTree(renderedByKind.get('overview-pin')), 'agy-overview-pin-btn');
+    assert.equal(pinBtn.props['data-pt-tip'], 'Unpin Overview panel');
+    await env.change({ pinOverview: false });
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), false);
+    pinBtn = findById(renderTree(renderedByKind.get('overview-pin')), 'agy-overview-pin-btn');
+    assert.equal(pinBtn.props['data-pt-tip'], 'Pin Overview in narrow windows');
+
+    // 7. Re-pin, then disable master switch -> removes data-agy-pin-overview & unmounts pin button cleanly
+    await env.change({ pinOverview: true });
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), true);
+    assert.equal(rootMounts.has('overview-pin'), true);
+
+    await env.change({ enabled: false });
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), false);
+    assert.equal(rootMounts.has('overview-pin'), false);
+    assert.deepEqual(
+      headerFlex.children.map(c => c.dataset?.agyPowertoolsRoot || 'customize-trigger'),
+      ['customize-trigger']
+    );
+
+    // Re-enable -> restores attribute and button; dispose -> removes both and detaches resize listener
+    await env.change({ enabled: true });
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), true);
+    assert.equal(rootMounts.has('overview-pin'), true);
+
+    p.context.__agyPowertools.dispose();
+    assert.equal(p.document.documentElement.hasAttribute('data-agy-pin-overview'), false);
+    assert.equal(rootMounts.has('overview-pin'), false);
+    assert.equal(winResizeListeners.size, 0);
+  } finally {
+    Date.now = origDateNow;
+    p.context.__agyPowertools?.dispose?.();
+  }
+});
+
+test('Issue #114: Settings panel places pinOverview below keepOverviewOpen under Sidebar & layout with bilingual search', () => {
+  const panelsCode = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
+  const hookStore = new Map();
+  let curHooks = [];
+  let stateIdx = 0;
+  const changes = [];
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    Fragment: 'fragment',
+    useId: () => 'id-1',
+    useState: init => {
+      const i = stateIdx++;
+      if (!(i in curHooks)) curHooks[i] = typeof init === 'function' ? init() : init;
+      const bag = curHooks;
+      return [bag[i], val => { bag[i] = typeof val === 'function' ? val(bag[i]) : val; }];
+    },
+    useEffect: () => {},
+    useLayoutEffect: () => {},
+    useRef: v => ({ current: v }),
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  const ctx = vm.createContext({
+    React,
+    Intl,
+    URL,
+    document: {
+      createElement: () => ({ dataset: {}, textContent: '', remove() {} }),
+      head: { append() {} },
+      body: {},
+      documentElement: { style: { setProperty() {}, removeProperty() {}, getPropertyValue: () => '' } }
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    __agyDashboard: {
+      dateRange: () => ({ preset: 'weeklyQuota', start: 0, end: 1 }),
+      summarizeRequests: () => ({ requests: [], success: 0, errors: 0, tokens: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0, cost: 0, priced: 0, points: [], models: [] }),
+      distributionModels: () => [],
+      subscriptionIdentity: () => ({ family: 'pro', style: 'pro', label: 'Pro' }),
+      annotateCacheAnomalies: () => new Map()
+    },
+    setInterval: () => 1,
+    clearInterval: () => {},
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    Uy: 'button',
+    Sy: 'tooltip',
+    dq: ({ name }) => ({ type: 'icon', props: { name }, children: [] }),
+    HC: 'popover',
+    IC: 'popover-trigger',
+    JC: 'popover-content',
+    VP: 'section',
+    TP: 'card',
+    UP: 'row',
+    XP: 'switch'
+  });
+  vm.runInContext(panelsCode, ctx);
+  let opts = { enabled: true, language: 'zh-CN', keepOverviewOpen: true, pinOverview: false };
+  const panels = ctx.__agyPanels({
+    t: s => s,
+    options: () => opts,
+    revision: () => 1,
+    subscribe: () => () => {},
+    fxRate: () => 6.7,
+    capabilities: () => ({}),
+    settingsError: () => '',
+    customFontError: () => '',
+    customFontNotice: () => '',
+    fontInfo: () => ({}),
+    proxyStatus: () => null,
+    updateNotice: () => null,
+    macDirectLauncher: () => null,
+    change: patch => { changes.push(patch); opts = { ...opts, ...patch }; }
+  });
+
+  const renderTree = (node, path = 'root') => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map((child, idx) => renderTree(child, `${path}.${idx}`));
+    if (typeof node.type === 'function') {
+      const key = `${path}:${node.type.name || 'fn'}`;
+      if (!hookStore.has(key)) hookStore.set(key, []);
+      const prevHooks = curHooks, prevIdx = stateIdx;
+      curHooks = hookStore.get(key);
+      stateIdx = 0;
+      let out;
+      try { out = node.type({ ...node.props, children: node.children }); }
+      finally { curHooks = prevHooks; stateIdx = prevIdx; }
+      return renderTree(out, key);
+    }
+    return { ...node, children: (Array.isArray(node.children) ? node.children : [node.children]).map((child, idx) => renderTree(child, `${path}/${idx}`)) };
+  };
+  const findAll = (node, pred, out = []) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const x of node) findAll(x, pred, out); return out; }
+    if (pred(node)) out.push(node);
+    findAll(node.children, pred, out);
+    return out;
+  };
+  const findById = (node, id) => findAll(node, n => n.props?.['data-testid'] === id)[0] || null;
+
+  // Render Settings -> click 'beams' category tab -> verify pinOverview sits right after keepOverviewOpen
+  let tree = renderTree(React.createElement(panels.Settings));
+  const beamsTab = findById(tree, 'agy-settings-cat-beams');
+  assert.ok(beamsTab);
+  beamsTab.props.onClick();
+
+  tree = renderTree(React.createElement(panels.Settings));
+  const rows = findAll(tree, n => n.type === 'row' && typeof n.props?.['data-testid'] === 'string');
+  const rowIds = rows.map(r => r.props['data-testid']);
+  const keepIdx = rowIds.indexOf('agy-setting-row-keepOverviewOpen');
+  const pinIdx = rowIds.indexOf('agy-setting-row-pinOverview');
+  assert.ok(keepIdx >= 0 && pinIdx === keepIdx + 1, `Expected pinOverview right after keepOverviewOpen, got ${rowIds.join(',')}`);
+  const pinRow = rows[pinIdx];
+  assert.equal(pinRow.props.label, '窄窗口固定概览面板');
+  assert.equal(pinRow.props.description, '默认关闭。开启后在窗口缩窄时保持右侧概览侧停不自动隐藏，也可点概览右上角图钉快速切换。');
+  pinRow.props.rightElement.props.onCheckedChange(true);
+  assert.deepEqual(JSON.parse(JSON.stringify(changes)), [{ pinOverview: true }]);
+
+  // Bilingual search finds pinOverview by Chinese & English keywords
+  const searchInput = findById(tree, 'agy-settings-search');
+  assert.ok(searchInput);
+  for (const query of ['图钉', '窄窗口', 'dock', 'narrow', 'pin']) {
+    searchInput.props.onChange({ target: { value: query } });
+    const filtered = renderTree(React.createElement(panels.Settings));
+    assert.ok(findById(filtered, 'agy-setting-row-pinOverview'), `Expected query "${query}" to match pinOverview`);
+  }
+  panels.dispose();
+});
+
+test('Beta AI backend RPCs: zero-byte injection when off, lazy beta.ensureLoaded, local provider CRUD, streaming delta throttle, abort on disconnect, and cache auto-purge', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { nativeSource, startNativeIntegration } = await import('../lib/native-host.mjs');
+
+  // 1. ZERO-BYTE INJECTION: nativeSource must never bundle native-beta-ai.js
+  const bootCode = nativeSource('https://127.0.0.1:5200', []);
+  assert.equal(bootCode.includes('extractThinkingMarkdown'), false);
+  assert.equal(bootCode.includes('renderSafeMarkdown'), false);
+  assert.equal(bootCode.includes('data-agy-translate-root'), false);
+  assert.equal(bootCode.includes('agy-composer-ghost-text'), false);
+
+  const dataDir = mkdtempSync(join(tmpdir(), 'agy-beta-host-'));
+  const portFile = join(dataDir, 'port');
+  const origin = 'https://127.0.0.1:5200';
+  const fetchBefore = globalThis.fetch;
+  let stop, receiveEvent, closeListeners = [];
+  const replies = new Map();
+  const evalExprs = [];
+  const deltaPushes = [];
+
+  let purgeCount = 0;
+  let lastTranslateCall = null;
+  let lastTranslateSignal = null;
+  const mockTranslator = {
+    purgeCache() { purgeCount++; return { ok: true, cleared: true }; },
+    async translate(args) {
+      lastTranslateCall = args;
+      lastTranslateSignal = args.signal;
+      if (args.text === 'HOLD_FOR_ABORT') {
+        return await new Promise((resolve, reject) => {
+          args.signal?.addEventListener('abort', () => {
+            const err = new Error('aborted');
+            err.name = 'AbortError';
+            reject(err);
+          }, { once: true });
+        });
+      }
+      args.onDelta?.('A', '第一步');
+      args.onDelta?.('B', '第一步完成');
+      return { ok: true, text: '第一步完成', cached: false, engine: args.engine };
+    }
+  };
+
+  let clearPredictCount = 0;
+  let lastPredictCall = null;
+  let lastPredictSignal = null;
+  const mockPredictor = {
+    clear() { clearPredictCount++; },
+    async predict(args) {
+      lastPredictCall = args;
+      lastPredictSignal = args.signal;
+      if (args.turnId === 'HOLD_DISCONNECT') {
+        return await new Promise(resolve => {
+          args.signal?.addEventListener('abort', () => resolve({ ok: false, aborted: true, suggestion: '', error: 'Request aborted' }), { once: true });
+        });
+      }
+      return { ok: true, suggestion: '帮我补充单元测试', skipped: false };
+    }
+  };
+
+  let lastListModelsArgs = null;
+  let lastTestConnArgs = null;
+  const mockAi = {
+    listModels: async args => {
+      lastListModelsArgs = args;
+      return { ok: true, models: ['gpt-4o-mini', 'gpt-4.1-mini'] };
+    },
+    testConnection: async args => {
+      lastTestConnArgs = args;
+      return { ok: true, latencyMs: 142, model: args.model || 'gpt-4o-mini' };
+    }
+  };
+
+  try {
+    writeFileSync(portFile, '12355\n');
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({ enabled: true, language: 'zh-CN' }));
+    globalThis.fetch = async () => ({ json: async () => [{ id: 'w-beta', type: 'page', title: 'Antigravity', url: origin + '/c/b1', webSocketDebuggerUrl: 'ws://127.0.0.1:12355/devtools/page/b1' }] });
+
+    stop = startNativeIntegration({
+      portFile,
+      dataDir,
+      wsl: false,
+      parseSessionData: () => ({}),
+      onStatus: () => {},
+      discover: async () => [],
+      translator: mockTranslator,
+      intentPredictor: mockPredictor,
+      aiProvider: mockAi,
+      connect: async () => ({
+        socket: {
+          addEventListener(type, fn) { if (type === 'close') closeListeners.push(fn); },
+          close() { for (const fn of [...closeListeners]) fn(); }
+        },
+        onEvent(cb) { receiveEvent = cb; },
+        async send(method, params = {}) {
+          if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame' } } };
+          if (method === 'Page.addScriptToEvaluateOnNewDocument') return { identifier: 'script' };
+          if (method === 'Runtime.evaluate') {
+            const expr = String(params.expression || '');
+            evalExprs.push(expr);
+            if (expr.includes('navigator.userAgent')) return { result: { value: { ua: 'Antigravity/2.35.2', isHub: true, sshKind: '', sshHost: '', title: 'Antigravity' } } };
+            if (expr.startsWith('globalThis.__agyPowertoolsReceive?.(')) {
+              vm.runInNewContext(expr, { __agyPowertoolsReceive: (id, data) => { replies.set(id, JSON.parse(JSON.stringify(data))); } });
+              return { result: { value: true } };
+            }
+            if (expr.startsWith('globalThis.__agyBetaTranslateDelta?.(')) {
+              vm.runInNewContext(expr, { __agyBetaTranslateDelta: (reqId, acc) => { deltaPushes.push({ reqId, acc }); } });
+              return { result: { value: true } };
+            }
+            return { result: { value: true } };
+          }
+          return {};
+        }
+      })
+    });
+
+    await stop.ready;
+    await receiveEvent({ method: 'Runtime.executionContextCreated', params: { context: { id: 99, origin, auxData: { isDefault: true, frameId: 'frame' } } } });
+    let seq = 1;
+    const rpc = async (method, payload = {}) => {
+      const id = seq++;
+      await receiveEvent({ method: 'Runtime.bindingCalled', params: { name: '__agyPowertoolsHost', executionContextId: 99, payload: JSON.stringify({ ...payload, id, method }) } });
+      return replies.get(id);
+    };
+
+    // 2. Lazy loader: evaluates native-beta-ai.js ONLY when beta.ensureLoaded is invoked
+    assert.equal(evalExprs.some(e => e.includes('if(!globalThis.__agyBetaAi)')), false);
+    const loaded = await rpc('beta.ensureLoaded');
+    assert.equal(loaded.ok, true);
+    assert.equal(evalExprs.some(e => e.includes('if(!globalThis.__agyBetaAi)') && e.includes('mountBetaAi')), true);
+
+    // 3. Local provider store CRUD + strict remote HTTP rejection
+    const secret = 'sk-super-secret-token-98765';
+    const emptyList = await rpc('beta.providersList');
+    assert.equal(emptyList.ok, true);
+    assert.deepEqual(emptyList.providers, []);
+
+    const badHttp = await rpc('beta.providerSave', {
+      provider: { name: 'Bad', protocol: 'openai', baseUrl: 'http://remote.example.com/v1', apiKey: secret, models: [] }
+    });
+    assert.equal(badHttp.ok, false);
+    assert.equal(badHttp.code, 'remote-http-disallowed');
+
+    const saved = await rpc('beta.providerSave', {
+      provider: { name: 'My Relay', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: secret, models: ['gpt-4o-mini', 'gpt-4.1-mini'] }
+    });
+    assert.equal(saved.ok, true);
+    assert.equal(saved.provider.name, 'My Relay');
+    assert.equal(saved.provider.apiKey, secret);
+    const pid = saved.provider.id;
+
+    // 4. aiListModels & aiTest resolve saved provider or inline draft
+    const modelsRes = await rpc('beta.aiListModels', { providerId: pid });
+    assert.equal(modelsRes.ok, true);
+    assert.deepEqual(modelsRes.models, ['gpt-4o-mini', 'gpt-4.1-mini']);
+    assert.equal(lastListModelsArgs.apiKey, secret);
+
+    const testRes = await rpc('beta.aiTest', { providerId: pid, model: 'gpt-4o-mini' });
+    assert.equal(testRes.ok, true);
+    assert.equal(testRes.latencyMs, 142);
+    assert.equal(lastTestConnArgs.apiKey, secret);
+    assert.equal(lastTestConnArgs.model, 'gpt-4o-mini');
+
+    // 5. Translation disabled by default; when enabled streams deltas and supports abort + auto-purge on toggle OFF
+    const disabledTr = await rpc('beta.translateThinking', { reqId: 'r-off', text: 'Let me inspect the files.' });
+    assert.equal(disabledTr.ok, false);
+    assert.equal(disabledTr.code, 'disabled');
+
+    await rpc('settings.set', {
+      settings: {
+        betaThinkingTranslate: true,
+        betaThinkingEngine: 'ai',
+        betaAiModel: `${pid}::gpt-4o-mini`,
+        betaAiTranslateModel: `${pid}::gpt-4.1-mini`
+      }
+    });
+    const trRes = await rpc('beta.translateThinking', { reqId: 'r-1', text: 'Let me inspect the files.', targetLang: 'zh-CN' });
+    assert.equal(trRes.ok, true);
+    assert.equal(trRes.text, '第一步完成');
+    assert.equal(trRes.engineUsed, 'ai');
+    assert.equal(lastTranslateCall.aiConfig.model, 'gpt-4.1-mini');
+    assert.equal(lastTranslateCall.aiConfig.apiKey, secret);
+    assert.ok(deltaPushes.some(d => d.reqId === 'r-1'));
+
+    // Concurrent abortTranslate aborts in-flight translate
+    const holdId = seq++;
+    const holdPromise = receiveEvent({
+      method: 'Runtime.bindingCalled',
+      params: { name: '__agyPowertoolsHost', executionContextId: 99, payload: JSON.stringify({ id: holdId, method: 'beta.translateThinking', reqId: 'r-abort', text: 'HOLD_FOR_ABORT' }) }
+    });
+    await new Promise(r => setImmediate(r));
+    assert.equal(lastTranslateSignal.aborted, false);
+    const abortReply = await rpc('beta.abortTranslate', { reqId: 'r-abort' });
+    assert.equal(abortReply.ok, true);
+    assert.equal(abortReply.aborted, true);
+    assert.equal(lastTranslateSignal.aborted, true);
+    await holdPromise;
+    assert.equal(replies.get(holdId).aborted, true);
+
+    // clearTranslateCache + auto-purge on transitioning betaThinkingTranslate -> false
+    const purgesBefore = purgeCount;
+    await rpc('beta.clearTranslateCache');
+    assert.equal(purgeCount, purgesBefore + 1);
+    await rpc('settings.set', { settings: { betaThinkingTranslate: false } });
+    assert.equal(purgeCount, purgesBefore + 2);
+
+    // 6. predictIntent: disabled when off, resolves betaAiPredictModel || betaAiModel when on, aborts on socket close
+    const disabledPred = await rpc('beta.predictIntent', { reqId: 'p-off', conversationId: 'c1', turnId: 't1', turns: [{ user: 'hi', assistant: 'hello' }] });
+    assert.equal(disabledPred.ok, false);
+    assert.equal(disabledPred.skipped, true);
+
+    await rpc('settings.set', { settings: { betaComposerPredict: true, betaAiModel: `${pid}::gpt-4o-mini`, betaAiPredictModel: '' } });
+    const predRes = await rpc('beta.predictIntent', { reqId: 'p-1', conversationId: 'c1', turnId: 't1', turns: [{ user: 'fix bug', assistant: 'Fixed.' }], language: 'zh-CN' });
+    assert.equal(predRes.ok, true);
+    assert.equal(predRes.suggestion, '帮我补充单元测试');
+    assert.equal(lastPredictCall.aiConfig.model, 'gpt-4o-mini');
+    assert.equal(lastPredictCall.aiConfig.apiKey, secret);
+
+    // Disconnect aborts in-flight predict request cleanly
+    const discId = seq++;
+    const discPromise = receiveEvent({
+      method: 'Runtime.bindingCalled',
+      params: { name: '__agyPowertoolsHost', executionContextId: 99, payload: JSON.stringify({ id: discId, method: 'beta.predictIntent', reqId: 'p-disc', conversationId: 'c1', turnId: 'HOLD_DISCONNECT', turns: [{ user: 'a', assistant: 'b' }] }) }
+    });
+    await new Promise(r => setImmediate(r));
+    assert.equal(lastPredictSignal.aborted, false);
+    for (const fn of [...closeListeners]) fn();
+    await discPromise;
+    assert.equal(lastPredictSignal.aborted, true);
+
+    // Delete provider also clears dangling model references from settings
+    const delRes = await rpc('beta.providerDelete', { providerId: pid });
+    assert.equal(delRes.ok, true);
+    assert.equal(delRes.removed, true);
+    assert.deepEqual(delRes.providers, []);
+    assert.equal(delRes.settings.betaAiModel, '');
+    assert.equal(delRes.settings.betaAiTranslateModel, '');
+  } finally {
+    await stop?.();
+    globalThis.fetch = fetchBefore;
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('native-ui lazy-loads Beta AI only when a Beta toggle is enabled and disposes cleanly when toggled off', async () => {
+  const p = page(true);
+  const hostCalls = [];
+  const timeoutsRecorded = [];
+  let mountedArgs = null;
+  let syncCalls = 0;
+  let disposeCalls = 0;
+  let stored = { enabled: true, betaThinkingTranslate: false, betaComposerPredict: false, language: 'zh-CN' };
+  let env = null;
+
+  p.context.setTimeout = (_fn, ms) => { timeoutsRecorded.push(ms); return timeoutsRecorded.length; };
+  p.context.clearTimeout = () => {};
+  p.context.__agyPanels = value => { env = value; return { Page: () => null, Sidebar: () => null, dispose() {} }; };
+  p.context.__agyNativeAdapter.installPage = () => true;
+  p.context.__agyInitialSettings = { ...stored };
+  p.context.__agyPowertoolsHost = raw => {
+    const req = JSON.parse(raw);
+    hostCalls.push(req);
+    queueMicrotask(() => {
+      if (req.method === 'settings.get') {
+        p.context.__agyPowertoolsReceive(req.id, { ...stored });
+      } else if (req.method === 'settings.set') {
+        stored = { ...stored, ...req.settings };
+        p.context.__agyPowertoolsReceive(req.id, { ...stored });
+      } else if (req.method === 'beta.ensureLoaded') {
+        p.context.__agyBetaAi = {
+          mountBetaAi(args) {
+            mountedArgs = args;
+            return {
+              sync() { syncCalls++; },
+              dispose() { disposeCalls++; }
+            };
+          }
+        };
+        p.context.__agyPowertoolsReceive(req.id, { ok: true });
+      } else {
+        p.context.__agyPowertoolsReceive(req.id, { ok: true });
+      }
+    });
+  };
+
+  vm.runInContext(source, p.context);
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  // Default OFF: never calls beta.ensureLoaded and never mounts Beta AI
+  assert.equal(hostCalls.some(c => c.method === 'beta.ensureLoaded'), false);
+  assert.equal(mountedArgs, null);
+
+  // Verify env exposes Beta provider bridge helpers and RPC timeout tiers
+  for (const fnName of ['betaProvidersList', 'betaProviderSave', 'betaProviderDelete', 'betaAiListModels', 'betaAiTest', 'betaClearTranslateCache']) {
+    assert.equal(typeof env[fnName], 'function', `env.${fnName} missing`);
+  }
+  for (const removedFn of ['betaSecretStatus', 'betaSaveKey', 'betaClearKey']) {
+    assert.equal(env[removedFn], undefined, `legacy env.${removedFn} should be removed`);
+  }
+  assert.equal('betaAiProvider' in env.options(), false, 'defaults fallback must omit removed betaAiProvider');
+  assert.equal('betaAiBaseUrl' in env.options(), false, 'defaults fallback must omit removed betaAiBaseUrl');
+
+  timeoutsRecorded.length = 0;
+  const callsBeforeBeta = hostCalls.length;
+  await env.betaProvidersList();
+  await env.betaProviderSave({ id: 'prov-1', name: 'OpenAI', protocol: 'openai', baseUrl: 'https://api.openai.com/v1' });
+  await env.betaProviderDelete('prov-1');
+  await env.betaAiListModels({ providerId: 'prov-1' });
+  await env.betaAiTest({ providerId: 'prov-1', model: 'gpt-4o-mini' });
+  await env.betaClearTranslateCache();
+  await env.request('beta.translateThinking', { reqId: 't1', text: 'hi' });
+  await env.request('beta.predictIntent', { reqId: 'p1', turns: [] });
+  const betaCalls = hostCalls.slice(callsBeforeBeta);
+  assert.deepEqual(betaCalls.map(c => c.method), [
+    'beta.providersList',
+    'beta.providerSave',
+    'beta.providerDelete',
+    'beta.aiListModels',
+    'beta.aiTest',
+    'beta.clearTranslateCache',
+    'beta.translateThinking',
+    'beta.predictIntent'
+  ]);
+  assert.equal(typeof betaCalls[1].id, 'number', 'RPC correlation id must remain numeric when saving provider with id');
+  assert.equal(betaCalls[1].providerId, 'prov-1');
+  assert.equal(betaCalls[1].provider?.id, 'prov-1');
+  assert.equal(typeof betaCalls[2].id, 'number', 'RPC correlation id must remain numeric when deleting provider');
+  assert.equal(betaCalls[2].providerId, 'prov-1');
+  assert.ok(timeoutsRecorded.includes(10000));
+  assert.ok(timeoutsRecorded.includes(20000));
+  assert.ok(timeoutsRecorded.includes(25000));
+  assert.ok(timeoutsRecorded.includes(30000));
+  assert.ok(timeoutsRecorded.includes(12000));
+
+  // Enabling betaThinkingTranslate lazily invokes beta.ensureLoaded and mounts with full contract
+  await env.change({ betaThinkingTranslate: true });
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+  assert.equal(hostCalls.filter(c => c.method === 'beta.ensureLoaded').length, 1);
+  assert.ok(mountedArgs);
+  for (const key of ['document', 'window', 'adapter', 'options', 'currentId', 'isTurnRunning', 'subscribe', 'request', 'uiText', 't']) {
+    assert.ok(key in mountedArgs, `mountBetaAi missing ${key}`);
+  }
+  assert.ok(syncCalls >= 1);
+
+  // Toggling OFF immediately disposes Beta AI controller
+  await env.change({ betaThinkingTranslate: false });
+  assert.equal(disposeCalls, 1);
+
+  // Re-enabling via betaComposerPredict re-mounts without re-calling beta.ensureLoaded
+  await env.change({ betaComposerPredict: true });
+  await new Promise(r => setImmediate(r));
+  assert.equal(hostCalls.filter(c => c.method === 'beta.ensureLoaded').length, 1);
+
+  // Master dispose cleans up Beta AI controller
+  p.context.__agyPowertools.dispose();
+  assert.equal(disposeCalls, 2);
+});
+
+test('Settings Advanced 6th category tab renders inline Beta tags, dropdowns, custom provider modal, unified model assignment, and bilingual search with zero middle dots', async () => {
+  const panelsCode = readFileSync(new URL('../lib/native-panels.js', import.meta.url), 'utf8');
+  const i18nCode = readFileSync(new URL('../lib/native-i18n.js', import.meta.url), 'utf8');
+  const hookStore = new Map();
+  let curHooks = [];
+  let stateIdx = 0;
+  const changes = [];
+  const rpcLog = [];
+  let savedProviders = [];
+  let opts = {
+    enabled: true,
+    language: 'zh-CN',
+    betaThinkingTranslate: false,
+    betaThinkingEngine: 'free',
+    betaThinkingDisplay: 'replace',
+    betaThinkingTrigger: 'auto',
+    betaComposerPredict: false,
+    betaAiModel: '',
+    betaAiTranslateModel: '',
+    betaAiPredictModel: ''
+  };
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
+    Fragment: 'fragment',
+    useId: () => 'id-beta',
+    useState: init => {
+      const i = stateIdx++;
+      if (!(i in curHooks)) curHooks[i] = typeof init === 'function' ? init() : init;
+      const bag = curHooks;
+      return [bag[i], val => { bag[i] = typeof val === 'function' ? val(bag[i]) : val; }];
+    },
+    useEffect: (fn, deps) => {
+      const i = stateIdx++;
+      const prev = curHooks[i];
+      const changed = !prev || !deps || deps.length !== prev.length || deps.some((d, idx) => d !== prev[idx]);
+      if (changed) { curHooks[i] = deps ? [...deps] : null; fn(); }
+    },
+    useLayoutEffect: () => {},
+    useRef: v => ({ current: v }),
+    useSyncExternalStore: (_, getSnap) => getSnap()
+  };
+  const ctx = vm.createContext({
+    React,
+    Intl,
+    URL,
+    document: {
+      createElement: () => ({ dataset: {}, textContent: '', remove() {} }),
+      head: { append() {} },
+      body: {},
+      documentElement: { style: { setProperty() {}, removeProperty() {}, getPropertyValue: () => '' } },
+      createTreeWalker: () => ({ nextNode: () => null }),
+      querySelectorAll: () => []
+    },
+    NodeFilter: { SHOW_TEXT: 4 },
+    MutationObserver: class { observe() {} disconnect() {} },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    __agyToZhTw: toZhTw,
+    __agyDashboard: {
+      dateRange: () => ({ preset: 'weeklyQuota', start: 0, end: 1 }),
+      summarizeRequests: () => ({ requests: [], success: 0, errors: 0, tokens: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0, cost: 0, priced: 0, points: [], models: [] }),
+      distributionModels: () => [],
+      subscriptionIdentity: () => ({ family: 'pro', style: 'pro', label: 'Pro' }),
+      annotateCacheAnomalies: () => new Map()
+    },
+    setInterval: () => 1,
+    clearInterval: () => {},
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    Uy: props => ({ type: 'button', props, children: props.children || [] }),
+    Sy: 'tooltip',
+    dq: ({ name }) => ({ type: 'icon', props: { name }, children: [] }),
+    HC: ({ children }) => ({ type: 'popover', props: {}, children }),
+    IC: ({ children }) => ({ type: 'popover-trigger', props: {}, children }),
+    JC: props => ({ type: 'popover-content', props, children: props.children || [] }),
+    kT: ({ children }) => ({ type: 'select', props: {}, children }),
+    lT: ({ children }) => ({ type: 'select-trigger', props: {}, children }),
+    mT: ({ children }) => ({ type: 'select-menu', props: {}, children }),
+    nT: props => ({ type: 'select-item', props, children: props.children || [] }),
+    VP: props => ({ type: 'section', props, children: props.children || [] }),
+    TP: ({ children }) => ({ type: 'card', props: {}, children }),
+    UP: props => ({ type: 'row', props, children: [props.label, props.description, props.rightElement, props.extraContent] }),
+    XP: props => ({ type: 'switch', props, children: [] })
+  });
+  vm.runInContext(i18nCode, ctx);
+  vm.runInContext(panelsCode, ctx);
+  const panels = ctx.__agyPanels({
+    t: s => s,
+    options: () => opts,
+    revision: () => 1,
+    subscribe: () => () => {},
+    fxRate: () => 6.7,
+    capabilities: () => ({}),
+    settingsError: () => '',
+    customFontError: () => '',
+    customFontNotice: () => '',
+    fontInfo: () => ({}),
+    proxyStatus: () => null,
+    updateNotice: () => null,
+    macDirectLauncher: () => null,
+    change: async patch => { changes.push(patch); opts = { ...opts, ...patch }; },
+    betaProvidersList: async () => {
+      rpcLog.push(['providersList']);
+      return { ok: true, providers: savedProviders };
+    },
+    betaProviderSave: async payload => {
+      rpcLog.push(['providerSave', payload]);
+      const p = payload?.provider || payload;
+      const saved = { id: p.id || 'prov_test1', name: p.name, protocol: p.protocol, baseUrl: p.baseUrl, apiKey: p.apiKey, models: p.models || [] };
+      savedProviders = [...savedProviders.filter(x => x.id !== saved.id), saved];
+      return { ok: true, provider: saved, providers: savedProviders };
+    },
+    betaProviderDelete: async id => {
+      rpcLog.push(['providerDelete', id]);
+      savedProviders = savedProviders.filter(x => x.id !== id);
+      return { ok: true, removed: true, providers: savedProviders };
+    },
+    betaAiListModels: async params => {
+      rpcLog.push(['listModels', params]);
+      return { ok: true, models: ['gpt-4o-mini', 'gpt-4.1-mini', 'o3-mini'] };
+    },
+    betaAiTest: async params => {
+      rpcLog.push(['test', params]);
+      return { ok: true, latencyMs: 88, model: params.model || 'gpt-4o-mini' };
+    },
+    betaClearTranslateCache: async () => {
+      rpcLog.push(['clearCache']);
+      return { ok: true };
+    }
+  });
+
+  const renderTree = (node, path = 'root') => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map((child, idx) => renderTree(child, `${path}.${idx}`));
+    if (typeof node.type === 'function') {
+      const key = `${path}:${node.type.name || 'fn'}`;
+      if (!hookStore.has(key)) hookStore.set(key, []);
+      const prevHooks = curHooks, prevIdx = stateIdx;
+      curHooks = hookStore.get(key);
+      stateIdx = 0;
+      let out;
+      try { out = node.type({ ...node.props, children: node.children }); }
+      finally { curHooks = prevHooks; stateIdx = prevIdx; }
+      return renderTree(out, key);
+    }
+    return { ...node, children: (Array.isArray(node.children) ? node.children : [node.children]).map((child, idx) => renderTree(child, `${path}/${idx}`)) };
+  };
+  const findAll = (node, pred, out = []) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const x of node) findAll(x, pred, out); return out; }
+    if (pred(node)) out.push(node);
+    findAll(node.children, pred, out);
+    return out;
+  };
+  const findById = (node, id) => findAll(node, n => n.props?.['data-testid'] === id)[0] || null;
+  const collectText = node => {
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (!node || typeof node !== 'object') return '';
+    if (Array.isArray(node)) return node.map(collectText).join(' ');
+    return collectText(node.children);
+  };
+
+  // 1. Advanced (高级功能) is the 6th category tab right after system
+  let tree = renderTree(React.createElement(panels.Settings));
+  const tabsNav = findById(tree, 'agy-settings-categories');
+  const tabBtns = findAll(tabsNav, n => typeof n.props?.['data-testid'] === 'string' && n.props['data-testid'].startsWith('agy-settings-cat-'));
+  assert.deepEqual(tabBtns.map(n => n.props['data-testid']), [
+    'agy-settings-cat-general',
+    'agy-settings-cat-beams',
+    'agy-settings-cat-features',
+    'agy-settings-cat-accounts',
+    'agy-settings-cat-system',
+    'agy-settings-cat-beta'
+  ]);
+  assert.equal(collectText(tabBtns[5]).trim(), '高级功能');
+
+  // 2. Click Advanced tab -> verify NO notice banner, inline (Beta) tags, updated prediction copy, custom providers section
+  findById(tree, 'agy-settings-cat-beta').props.onClick();
+  tree = renderTree(React.createElement(panels.Settings));
+  await new Promise(r => setImmediate(r));
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.equal(findById(tree, 'agy-beta-notice'), null, 'experimental notice banner must be removed');
+  assert.match(collectText(findById(tree, 'agy-setting-row-betaThinkingTranslate')), /思维过程翻译.*\(Beta\)/);
+  assert.match(collectText(findById(tree, 'agy-setting-row-betaComposerPredict')), /输入框意图预测.*\(Beta\)/);
+  assert.match(collectText(findById(tree, 'agy-setting-row-betaComposerPredict')), /空闲且输入框为空时在行内显示续写建议，按 Tab 采纳；需在下方配置自定义 AI 模型。/);
+  assert.ok(findById(tree, 'agy-ai-providers-section'));
+  assert.ok(findById(tree, 'agy-ai-provider-add'));
+
+  // 3. Turn ON betaThinkingTranslate -> sub-drawer uses uniform Select dropdowns
+  findById(tree, 'agy-setting-betaThinkingTranslate').props.onCheckedChange(true);
+  await new Promise(r => setImmediate(r));
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.ok(findById(tree, 'agy-setting-row-betaThinkingOptions'));
+  assert.ok(findById(tree, 'agy-beta-engine-select'));
+  assert.ok(findById(tree, 'agy-beta-display-select'));
+  assert.ok(findById(tree, 'agy-beta-trigger-select'));
+  findById(tree, 'agy-beta-clear-cache').props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.ok(rpcLog.some(([op]) => op === 'clearCache'));
+
+  // 4. Open Add Provider modal -> 4 .pt-price-mode protocols (no ollama), eye key toggle, fetch models, test & save
+  findById(tree, 'agy-ai-provider-add').props.onClick();
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.ok(findById(tree, 'agy-ai-provider-modal'));
+  assert.ok(findById(tree, 'agy-provider-proto-openai'));
+  assert.ok(findById(tree, 'agy-provider-proto-openai-responses'));
+  assert.ok(findById(tree, 'agy-provider-proto-anthropic'));
+  assert.ok(findById(tree, 'agy-provider-proto-gemini'));
+  assert.equal(findById(tree, 'agy-provider-proto-ollama'), null);
+  assert.equal(findById(tree, 'agy-provider-api-key').props.type, 'password');
+  findById(tree, 'agy-provider-key-toggle').props.onClick();
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.equal(findById(tree, 'agy-provider-api-key').props.type, 'text');
+  findById(tree, 'agy-provider-name').props.onChange({ target: { value: 'My Relay' } });
+  findById(tree, 'agy-provider-base-url').props.onChange({ target: { value: 'https://relay.example.com/v1' } });
+  findById(tree, 'agy-provider-api-key').props.onChange({ target: { value: 'sk-relay-key' } });
+  findById(tree, 'agy-provider-models').props.onChange({ target: { value: 'gpt-4o-mini, gpt-4.1-mini' } });
+  tree = renderTree(React.createElement(panels.Settings));
+  findById(tree, 'agy-provider-test-conn').props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.match(collectText(findById(tree, 'agy-ai-provider-modal')), /88 ms/);
+  const modalForm = findAll(findById(tree, 'agy-ai-provider-modal'), n => n.type === 'form')[0];
+  assert.ok(modalForm);
+  await modalForm.props.onSubmit({ preventDefault() {} });
+  await new Promise(r => setImmediate(r));
+  tree = renderTree(React.createElement(panels.Settings));
+  assert.ok(findById(tree, 'agy-ai-provider-row-prov_test1'));
+
+  // 5. Zero middle dots anywhere in Advanced Settings tab
+  assert.doesNotMatch(collectText(tree), /[\u00b7\u2022\u2027\u30fb]/);
+
+  // 6. Cross-category bilingual search finds Advanced settings from General tab
+  findById(tree, 'agy-settings-cat-general').props.onClick();
+  tree = renderTree(React.createElement(panels.Settings));
+  const searchInput = findById(tree, 'agy-settings-search');
+  for (const [q, expectedId] of [
+    ['翻译', 'agy-setting-row-betaThinkingTranslate'],
+    ['thinking', 'agy-setting-row-betaThinkingTranslate'],
+    ['ghost', 'agy-setting-row-betaComposerPredict'],
+    ['预测', 'agy-setting-row-betaComposerPredict'],
+    ['anthropic', 'agy-ai-providers-section'],
+    ['gemini', 'agy-ai-providers-section']
+  ]) {
+    searchInput.props.onChange({ target: { value: q } });
+    const filtered = renderTree(React.createElement(panels.Settings));
+    assert.ok(findById(filtered, expectedId), `Expected query "${q}" to match ${expectedId}`);
+  }
+  panels.dispose();
 });
 
 test('MultiDeviceSyncSection renders without toggle error when enabled, runs sync, and Overview/EventTable filter by device', async () => {

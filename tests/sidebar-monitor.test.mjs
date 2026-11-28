@@ -564,7 +564,7 @@ test('Settings panel renders sidebar running beam palette, hide-spinner toggle, 
     kT: ({ children }) => children,
     lT: ({ children }) => children,
     mT: ({ children }) => children,
-    nT: ({ children }) => children,
+    nT: props => ({ type: 'select-item', props, children: props.children || [] }),
     Uy: props => ({ type: 'button', props, children: [] }),
     XP: props => ({ type: 'switch', props, children: [] }),
     UP: props => ({ type: 'row', props, children: [props.rightElement, props.extraContent] }),
@@ -673,14 +673,15 @@ test('Settings panel renders sidebar running beam palette, hide-spinner toggle, 
   assert.equal(sbStage?.props?.['data-palette'], 'quota');
   assert.equal(sbStage?.props?.['data-style'], 'pulse-outside');
   assert.equal(sbStage?.props?.style?.['--pt-bs-1'], '#EF4444');
-  // Beam style pills reflect active selection, localized labels, and call env.change({ sidebarRunningBeamStyle })
-  assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-sweep')?.props?.['aria-pressed'], false);
-  assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-inner')?.props?.['aria-pressed'], false);
-  assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-outside')?.props?.['aria-pressed'], true);
-  assert.equal(collectText(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-inner')), '内发光脉冲');
-  assert.equal(collectText(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-outside')), '外光晕脉冲');
-  onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-inner').props.onClick();
-  onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-sweep').props.onClick();
+  // Beam style Select dropdown reflects active selection, localized labels, and calls env.change({ sidebarRunningBeamStyle })
+  assert.ok(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select'));
+  assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-sweep')?.props?.selected, false);
+  assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-inner')?.props?.selected, false);
+  assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-outside')?.props?.selected, true);
+  assert.equal(collectText(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-inner')), '内发光脉冲');
+  assert.equal(collectText(onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-outside')), '外光晕脉冲');
+  onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-inner').props.onClick();
+  onNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-sweep').props.onClick();
   // Composer working beam is a 360-degree WebGL perimeter orbit, so it MUST NOT render the inline bottom-sweep stage; keep Try preview button.
   assert.equal(onNodes.find(n => n.props?.['data-testid'] === 'agy-composer-beam-stage'), undefined);
   assert.ok(onNodes.find(n => n.props?.['data-testid'] === 'agy-beam-preview-toggle'));
@@ -700,9 +701,9 @@ test('Settings panel renders sidebar running beam palette, hide-spinner toggle, 
   const innerTree = renderWith({ enabled: true, language: 'en', sidebarRunningBeam: true, sidebarRunningBeamPalette: 'gemini', sidebarRunningBeamStyle: 'pulse-inner', sidebarHideNativeSpinner: true, sidebarRunningGroup: false, sidebarProjectLimit: 0 });
   const innerNodes = collectNodes(innerTree);
   assert.equal(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sidebar-beam-stage')?.props?.['data-style'], 'pulse-inner');
-  assert.equal(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-inner')?.props?.['aria-pressed'], true);
-  assert.equal(collectText(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-inner')), 'Inner pulse');
-  assert.equal(collectText(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-pulse-outside')), 'Outer pulse');
+  assert.equal(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-inner')?.props?.selected, true);
+  assert.equal(collectText(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-inner')), 'Inner pulse');
+  assert.equal(collectText(innerNodes.find(n => n.props?.['data-testid'] === 'agy-sb-style-select-pulse-outside')), 'Outer pulse');
   assert.equal(/[\u00b7\u2022\u2027\u30fb]/.test(collectText(innerTree)), false);
 
   const offTree = renderWith({ enabled: true, language: 'zh-CN', sidebarRunningBeam: false, sidebarRunningBeamPalette: 'gemini', sidebarRunningBeamStyle: 'pulse-inner', sidebarHideNativeSpinner: true, sidebarRunningGroup: true, sidebarProjectLimit: 0 });

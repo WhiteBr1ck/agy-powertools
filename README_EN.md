@@ -227,6 +227,20 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 
 ## Changelog
 
+### v2.17.0
+- **New "Advanced" Settings tab (6th category; all experimental AI features opt-in and off by default with zero-byte lazy loading)**:
+  - **Thinking translation (Beta)**: Ships with zero-login **Google Translate** (`translateHtml` + `gtx` + Microsoft Edge fallback over the plugin proxy channel) out of the box, plus optional custom AI streaming translation. Strictly scoped to Thinking collapsible blocks while preserving fenced/inline code, URLs, and identifiers via placeholder masking; supports Translated-only or Bilingual display, automatic viewport-lazy or manual trigger, flush-left per-block Original/Translated toggling, full-block cache backfill after streaming for instant zero-reload re-opening, and automatic cleanup of the `0600` 7-day local cache when disabled.
+  - **Composer intent prediction (Beta)**: Generates next-prompt suggestions when a reply finishes and the main composer is empty, plus on-demand generation when explicitly clicking or keyboard-focusing the empty composer of an unpredicted idle thread (zero API calls while browsing sidebar history). After a `160ms` grace delay, gently cycles playful 10-language loading prompts inline before fading into muted gray ghost text with a subtle `Tab` hint (accepting inserts without sending; deleting back to empty immediately restores the cached turn suggestion from memory; typing, pasting, IME composition, or `Esc` dismisses and aborts in-flight requests; zero disk persistence).
+  - **Multi-protocol Custom Providers and unified Model selection**: Upgrades [proxy.mjs](lib/proxy.mjs) for POST, JSON, and SSE streaming; manages multiple named providers in a dedicated `0600` local `ai-providers.json` file (isolated from settings export/import). The Add/Edit Provider dialog reuses Pricing's segmented control for **OpenAI-compatible**, **OpenAI Responses**, **Anthropic-compatible**, and **Gemini-compatible** protocols, with an eye visibility toggle for API keys, one-click model fetching with searchable multi-select, and connectivity testing, paired with unified dropdown model selectors below for default, translation, and prediction tasks.
+- **Quiet composer indicators and MD3 Expressive wavy quota popover (closes #115, closes #116)**:
+  - Adds **Composer indicator style** (`Semantic` / `Muted gray`) and **Icon only** mode (hiding inline numbers for a minimal Codex-style footer across main and subagent composers), plus a **Monochrome** tone option for the Composer Quota Halo.
+  - Adds an opt-in **Composer quota indicator** (off by default) with an independent **Quota window** selector (`Auto (lower)` / `5-hour limit` / `Weekly limit`) tracking the active model's pool, opening a redesigned `268px` compact Account Quota popover with **Material 3 Expressive wavy progress bars** (sinusoidal active track, 4px gap, straight inactive track, end stop dot) and clear group typography hierarchy.
+- **Pin Overview panel in narrow windows (closes #114)**: Adds **Pin Overview in narrow windows** (off by default) under the renamed **Motion & Sidebar** tab along with a monochrome inline push-pin toggle in the Overview header (outline when unpinned, solid fill when pinned), promoting narrow-window layout to stay docked while respecting manual collapse.
+- **Settings and Quick Popover polish**:
+  - Persists the last visited tab and Settings category across Quick Popover close/reopen and conversation switches;
+  - Renames the second Settings tab to **Motion & Sidebar** and standardizes uneven text pill groups (translation engine/display/trigger, indicator style, halo tone, sidebar beam style) into clean uniform dropdown selectors;
+  - Full 10-language localization across all new UI controls and playful loading prompts with comprehensive test coverage.
+
 ### v2.16.14
 - **Fix Windows account-switch regression reporting `process-list-unavailable` and skipping credential restore (closes #120)**: Rewrites `listWindowsCredentialWriters()` in [relaunch-worker.mjs](scripts/relaunch-worker.mjs) to avoid slow unbounded `tasklist /FI USERNAME` timeouts by running fast unfiltered `tasklist /FO CSV /NH` first, skipping non-matching `PID 0` (`System Idle Process`), and narrowing per matched `IMAGENAME + USERNAME` with localized zero-match support only when writers are present.
 - **Fix WSL2 proxy relaunch failures and `not-applied` mismatch loops (closes #113)**: Always copies `relaunch-worker.mjs` to Windows `%TEMP%` with matching `cwd` (avoiding 9P UNC stalls past the 6s ACK timeout), forwards and allowlists `--wsl-distro=<distro>`, and propagates/cleans up proxy variables, `AGY_POWERTOOLS_PROXY_SPEC`, and `GODEBUG` via unidirectional `WSLENV` `/u` entries for WSL2 jobs.
@@ -252,6 +266,9 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
   - Matches `language_server_windows_*.exe` and `agy.exe` with fail-closed `tasklist` validation, preserves custom `ANTIGRAVITY_USER_DATA_DIR`, enforces fail-closed credential email checks and `.NET JavaScriptSerializer` parsing, and adds strict multi-account quota attribution guards and concurrent-switch locks;
   - Adds `submitting` phase, monotonic `requestId`, and `lastUpdateActionAt` in `sidecar-ui.mjs` to eliminate update poll races;
   - Pins `realpathSync.native` root paths across update lifecycles (`TOCTOU` defense) and guards all cleanup/unlock paths with `assertOwnedPath` in [lifecycle.mjs](lib/lifecycle.mjs) and [update-manager.mjs](lib/update-manager.mjs).
+
+<details>
+<summary>View earlier releases (v2.13.7 - v2.16.11)</summary>
 
 ### v2.16.11
 - **Fix sidecar crash under SOCKS5 proxies and harden proxy relaunch reliability (#93, #64)**: Drops `NODE_USE_ENV_PROXY` (which crashes Node `fetch` on SOCKS5/SOCKS5H), migrates [pricing.mjs](lib/pricing.mjs) to `createProxyFetcher()`, raises Windows relaunch ACK timeout to 6s while clearing `lastRelaunchAt` on failure, enables auto-relaunch on unmanaged external proxy config changes, makes `configureLaunchers()` non-blocking, and preserves the 24h relaunch-blocked cooldown across 4s debug-port polls.
@@ -413,6 +430,8 @@ Every setting applies live in **Powertools -> Settings** and saves automatically
 - Added incremental checkpoint calibration for multi-device weekly quota estimates (#19).
 - Removed Windows hidden PowerShell taskbar flashing calls to prevent AV false positives, and disabled the unused legacy `hooks.json` hook (#20).
 - Added translations for sidebar project menus, permission approval dialogs, `Thought for Xs`, and `Step X of Y`.
+
+</details>
 
 <details>
 <summary>View earlier releases (v2.10.0 - v2.13.6)</summary>

@@ -227,6 +227,20 @@ sh ./install.sh
 
 ## 更新日志
 
+### v2.17.0
+- **新增设置页第 6 分组「高级功能」（实验性 AI 能力默认全部关闭，零字节按需懒加载）**：
+  - **思维过程翻译（Beta）**：默认内置免登录 **Google 翻译**（`translateHtml` + `gtx` + 微软 Edge 三级回退，复用插件独立代理通道，无需配置即可开箱使用），也可切换为自定义 AI 模型流式翻译；严格限定仅作用于思考过程折叠块，自动占位保护代码块、行内代码、URL 与标识符；支持仅显示译文 / 双语对照、自动视口懒加载 / 手动点击、单块左对齐「原文 / 译文」即时切换、流式完成后自动合并整块缓存实现二次点开零重加载，以及关闭开关自动清除本地 `0600` 7 天缓存。
+  - **输入框意图预测（Beta）**：回复完成且主输入框为空时自动按需生成下一步续写建议，切到历史空闲对话仅在主动点击或键盘 `Tab` 聚焦空输入框时按需触发（侧栏翻看历史零消耗）；生成等待超过 `160ms` 会在行内轮询柔和呼吸的 10 语种俏皮提示，就绪后直接以浅灰字与极简 `Tab` 标替换原生占位符（按 `Tab` 仅填入绝不自动发送，删回空输入框立刻从内存恢复本轮建议，打字/粘贴/中文输入法/按 `Esc` 立即取消并中止在途请求，零磁盘持久化）。
+  - **多协议「自定义供应商」与统一「模型分配」**：升级底层代理通道 [proxy.mjs](lib/proxy.mjs) 支持 POST/JSON/SSE 流式传输；支持独立管理多个自定义供应商（存于独立 `0600` 本地文件 `ai-providers.json`，不随配置导出导入），弹窗复用价格页同款分段控件切换 **OpenAI 兼容**、**OpenAI Responses**、**Anthropic 兼容**、**Gemini 兼容** 四大协议，内置 API 密钥明文/密文切换眼睛按钮、一键拉取并搜索勾选模型与连通性测试，并在下方统一为默认模型、思考翻译和意图预测分配模型。
+- **输入框底栏指标静谧化与 MD3 波浪进度条账号额度浮窗（closes #115，closes #116）**：
+  - 「统计与增强」新增 **底栏指标样式**（`语义彩色` / `静谧灰`）与 **仅显示图标**（隐藏内联数字，类似 Codex 极简底栏，点击展开完整明细），同步覆盖主输入框与子智能体输入框；「输入框额度光环」新增 **静谧单色** 配色选项。
+  - 新增可选 **输入框额度指示器**（默认关闭）及独立 **额度周期** 选择（`自动（较低项）` / `5 小时限额` / `周限额`），追踪当前模型所属额度池；点击展开全新重构的 `268px` 紧凑「账号额度」浮窗，采用 **Material 3 Expressive 波浪进度条**（正弦波浪活跃轨、4px 断口、直线底轨与终点圆点）与清晰的分组字号层级。
+- **窄窗口固定右侧概览面板（closes #114）**：在更名后的 **「动效与侧栏」** 分组新增「窄窗口固定概览面板」（默认关闭），并在概览标题栏内置原生风格单色图钉按钮（未固定描边、固定后纯色实心无底框）；开启后在窄窗口下自动保持右侧概览侧停不收起，同时尊重手动折叠。
+- **设置与快捷浮窗体验统一打磨**：
+  - 右上角「标题栏快捷概览」与管理页支持持久化记忆上次访问的页签与设置子分组，关闭重开或切换会话后直接回到上次位置；
+  - 设置页第二分组更名为 **「动效与侧栏」**，并将翻译引擎/显示/触发方式、底栏指标样式、光环配色与侧栏流光样式等选项按钮统一收敛为齐整的下拉选择器；
+  - 全部新功能与 10 条加载提示完整同步 10 种界面语言，并补齐繁中词表与全量自动化测试。
+
 ### v2.16.14
 - **紧急修复 Windows 切号报 `process-list-unavailable` 跳过凭据恢复的回归问题（closes #120）**：重构 [relaunch-worker.mjs](scripts/relaunch-worker.mjs) 的 `listWindowsCredentialWriters()`，不再调用容易在桌面多进程环境下超时的无镜像 `tasklist /FI USERNAME` 扫描；改为先执行快速全量 `tasklist /FO CSV /NH` 并放行非目标 `PID 0`（`System Idle Process`），仅在存在残留凭据写进程时按具体 `IMAGENAME + USERNAME` 窄查询并兼容中文/英文无匹配提示。
 - **修复 WSL2 模式下代理重启失败与状态失配循环（closes #113）**：WSL2 重启始终将 `relaunch-worker.mjs` 复制至 Windows `%TEMP%` 并切换工作目录，彻底避免 9P UNC 路径卡死超过 ACK 超时；补齐重启参数 `--wsl-distro=<distro>` 透传与白名单校验；在 [relaunch-worker.mjs](scripts/relaunch-worker.mjs) 针对 WSL2 任务通过 `WSLENV` `/u` 单向透传代理环境变量、`AGY_POWERTOOLS_PROXY_SPEC` 与 `GODEBUG`，关闭代理时自动清理。
@@ -252,6 +266,9 @@ sh ./install.sh
   - Windows 重启器支持 `language_server_windows_*.exe` / `agy.exe` 识别与 `tasklist` 异常 fail-closed，保留自定义 `ANTIGRAVITY_USER_DATA_DIR`，凭据邮箱空值 fail-closed 并升级 Win32 JSON 解析为 `.NET JavaScriptSerializer`，补齐多账号额度归因保护与切号锁；
   - 伴生页更新状态机新增 `submitting` 阶段、单调 `requestId` 与 `lastUpdateActionAt` 消除轮询竞态；
   - [lifecycle.mjs](lib/lifecycle.mjs) 与 [update-manager.mjs](lib/update-manager.mjs) 补全 `realpathSync.native` 根路径 TOCTOU 钉死与全路径 `assertOwnedPath` 校验。
+
+<details>
+<summary>查看历史版本（v2.13.7 - v2.16.11）</summary>
 
 ### v2.16.11
 - **修复 SOCKS5 代理下伴生进程崩溃与重启稳定性（#93，#64）**：移除会令 Node `fetch` 在 SOCKS5 环境下异常的 `NODE_USE_ENV_PROXY`，[pricing.mjs](lib/pricing.mjs) 统一走 `createProxyFetcher()`；Windows 重启 ACK 等待延长至 6 秒并在失败时清理 `lastRelaunchAt`，支持外部代理配置变更自动重启，快捷方式修补改为非阻塞执行，且 4 秒调试端口轮询不再误清 24 小时重启熔断状态。
@@ -414,6 +431,8 @@ sh ./install.sh
 - 多设备混用周限额估算改为增量快照校准，剔除无本机请求的跨设备消耗（#19）。
 - 移除 Windows 隐藏 PowerShell 任务栏闪烁调用，消除杀软误报，同时停用遗留 `hooks.json` 钩子（#20）。
 - 补全侧栏项目右键菜单、权限审批弹窗以及 `Thought for Xs`、`Step X of Y` 等高频翻译。
+
+</details>
 
 <details>
 <summary>查看早期版本（v2.10.0 - v2.13.6）</summary>
