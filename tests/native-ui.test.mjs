@@ -5517,7 +5517,7 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
     Sy: ({ children }) => children,
     Wz: ({ children }) => children
   });
-  vm.runInContext(`(() => { ${dashboardSrc}; globalThis.__agyDashboard = { modelIdentity, timestampToMs, resolveWeeklyQuotaWindow, dateRange, summarizeRequests, subscriptionIdentity, distributionModels, annotateCacheAnomalies }; })();`, ctx);
+  vm.runInContext(`(() => { ${dashboardSrc}; globalThis.__agyDashboard = { modelIdentity, timestampToMs, resolveWeeklyQuotaWindow, dateRange, summarizeRequests, subscriptionIdentity, distributionModels, summarizeDevices, distributionDevices, annotateCacheAnomalies }; })();`, ctx);
   vm.runInContext(i18nSrc, ctx);
   vm.runInContext(panelsSrc, ctx);
 
@@ -5640,11 +5640,22 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
   assert.ok(findByTestId(ovTree, 'agy-overview-device-filter'));
   assert.ok(findByTestId(ovTree, 'agy-overview-device-filter-all'));
   assert.ok(findByTestId(ovTree, 'agy-overview-device-filter-dev-1'));
-  const ovDev2 = findByTestId(ovTree, 'agy-overview-device-filter-dev-2');
-  assert.ok(ovDev2);
-  ovDev2.props.onClick();
+  assert.ok(findByTestId(ovTree, 'agy-device-distribution'));
+  assert.ok(findByTestId(ovTree, 'agy-device-usage-donut'));
+  assert.ok(findByTestId(ovTree, 'agy-device-cost-donut'));
+  const devLegend = findByTestId(ovTree, 'agy-device-distribution-legend');
+  assert.ok(devLegend);
+  const ovRowDev2 = findByTestId(ovTree, 'agy-device-distribution-row-dev-2');
+  assert.ok(ovRowDev2);
+  assert.match(collectText(ovRowDev2), /PC-Boulot/);
+  ovRowDev2.props.onClick();
   ovTree = renderOverview();
   assert.equal(findByTestId(ovTree, 'agy-overview-device-filter-dev-2').props.selected, true);
+  assert.equal(findByTestId(ovTree, 'agy-device-distribution'), null);
+
+  findByTestId(ovTree, 'agy-overview-device-filter-all').props.onClick();
+  ovTree = renderOverview();
+  assert.ok(findByTestId(ovTree, 'agy-device-distribution'));
 
   let reqTree = renderRequests();
   assert.ok(findByTestId(reqTree, 'agy-device-filter'));

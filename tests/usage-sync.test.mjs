@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { annotateCacheAnomalies } from '../lib/dashboard.mjs';
+import { annotateCacheAnomalies, distributionDevices, summarizeDevices } from '../lib/dashboard.mjs';
 import { createQuotaTracker } from '../lib/quota.mjs';
 import { createSettingsStore } from '../lib/settings.mjs';
 import { discoverKnownSshHosts } from '../lib/ssh-remote.mjs';
@@ -402,4 +402,38 @@ test('discoverKnownSshHosts collects unique valid hosts from ssh_windows.json, a
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('summarizeDevices and distributionDevices aggregate usage by device and group overflow under __other__', () => {
+  const devices = [
+    { deviceId: 'dev-1', deviceName: 'PC-Maison', isLocal: true },
+    { deviceId: 'dev-2', deviceName: 'ZimaOS', isLocal: false }
+  ];
+  const requests = [
+    { id: 'r1', deviceId: 'dev-1', deviceName: 'PC-Maison', inputTokens: 500, cacheReadTokens: 1000, outputTokens: 200, costUsd: 0.5 },
+    { id: 'r2', deviceId: 'dev-2', deviceName: 'ZimaOS', isRemotePeer: true, inputTokens: 300, cacheReadTokens: 700, outputTokens: 100, costUsd: 0.25 },
+    { id: 'r3', deviceId: 'dev-2', deviceName: 'ZimaOS', isRemotePeer: true, inputTokens: 200, cacheReadTokens: 200, outputTokens: 50, costUsd: 0.1 },
+    { id: 'r4', deviceId: 'dev-3', deviceName: 'PC-3', inputTokens: 100, cacheReadTokens: 0, outputTokens: 20, costUsd: 0.05 },
+    { id: 'r5', deviceId: 'dev-4', deviceName: 'PC-4', inputTokens: 90, cacheReadTokens: 0, outputTokens: 10, costUsd: 0.04 },
+    { id: 'r6', deviceId: 'dev-5', deviceName: 'PC-5', inputTokens: 80, cacheReadTokens: 0, outputTokens: 10, costUsd: 0.03 },
+    { id: 'r7', deviceId: 'dev-6', deviceName: 'PC-6', inputTokens: 70, cacheReadTokens: 0, outputTokens: 10, costUsd: 0.02 }
+  ];
+
+  const stats = summarizeDevices(requests, devices);
+  assert.equal(stats.length, 6);
+  assert.equal(stats[0].id, 'dev-1');
+  assert.equal(stats[0].isLocal, true);
+  assert.equal(stats[0].tokens, 1700);
+  assert.equal(stats[0].requests, 1);
+  assert.equal(stats[1].id, 'dev-2');
+  assert.equal(stats[1].isLocal, false);
+  assert.equal(stats[1].tokens, 1550);
+  assert.equal(stats[1].requests, 2);
+
+  const dist = distributionDevices(stats, 5);
+  assert.equal(dist.length, 6);
+  assert.equal(dist[5].id, '__other__');
+  assert.equal(dist[5].tokens, 80);
+  assert.equal(dist[5].requests, 1);
+  assert.ok(Math.abs(dist[5].cost - 0.02) < 1e-9);
 });
