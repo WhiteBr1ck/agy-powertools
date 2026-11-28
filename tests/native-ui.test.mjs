@@ -4186,7 +4186,7 @@ test('About panel surfaces update.install error message when request rejects (Is
     kT: ({ children }) => children,
     lT: ({ children }) => children,
     mT: ({ children }) => children,
-    nT: ({ children }) => children,
+    nT: props => ({ type: 'menu-item', props, children: props.children || [] }),
     Uy: props => ({ type: 'button', props, children: [] }),
     XP: props => ({ type: 'switch', props, children: [] }),
     UP: props => ({ type: 'row', props, children: [props.description, props.rightElement, props.extraContent] }),
@@ -5345,4 +5345,269 @@ test('QuickPopover keeps full 940px width when space remains on the left and tra
   assert.equal(rootProps.get('--pt-qp-max-w'), '971px');
   panels.dispose();
   assert.equal(rootProps.has('--pt-qp-max-w'), false);
+});
+
+test('MultiDeviceSyncSection renders without toggle error when enabled, runs sync, and Overview/EventTable filter by device', async () => {
+  const i18nSrc = readFileSync('lib/native-i18n.js', 'utf8');
+  const dashboardSrc = readFileSync('lib/dashboard.mjs', 'utf8').replaceAll('export function', 'function');
+  const panelsSrc = readFileSync('lib/native-panels.js', 'utf8');
+
+  const findByTestId = (node, tid) => {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const c of node) { const hit = findByTestId(c, tid); if (hit) return hit; } return null; }
+    if (node.props?.['data-testid'] === tid) return node;
+    return findByTestId(node.children, tid);
+  };
+  const collectAllByTestId = (node, tid, out = []) => {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { for (const c of node) collectAllByTestId(c, tid, out); return out; }
+    if (node.props?.['data-testid'] === tid) out.push(node);
+    collectAllByTestId(node.children, tid, out);
+    return out;
+  };
+  const collectText = node => {
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (!node || typeof node !== 'object') return '';
+    if (Array.isArray(node)) return node.map(collectText).join(' ');
+    return collectText(node.children);
+  };
+
+  const states = new Map();
+  let currentComp = null;
+  let slotIdx = 0;
+  let opts = {
+    enabled: true,
+    language: 'fr',
+    syncEnabled: false,
+    syncDeviceName: '',
+    syncDir: '',
+    syncSshHosts: '',
+    syncPrivacyMode: false,
+    overviewRange: 'all',
+    pricingMode: 'standard',
+    tokenUnit: 'compact',
+    currency: 'USD'
+  };
+  const changeCalls = [];
+  let runSyncCalls = 0;
+  let syncStatus = {
+    enabled: false,
+    deviceId: 'dev-1',
+    deviceName: 'PC-Perso',
+    defaultDeviceName: 'PC-Perso',
+    syncDir: '',
+    resolvedSyncDir: '',
+    sshHosts: [],
+    privacyMode: false,
+    peers: [],
+    lastError: ''
+  };
+  const now = Date.now();
+  const dashboardData = {
+    activeAccountEmail: 'user@example.com',
+    accountEmails: ['user@example.com'],
+    devices: [
+      { deviceId: 'dev-1', deviceName: 'PC-Perso', kind: 'local', isLocal: true, requestCount: 1, updatedAtMs: now },
+      { deviceId: 'dev-2', deviceName: 'PC-Boulot', kind: 'device', isLocal: false, requestCount: 1, updatedAtMs: now - 5000 }
+    ],
+    syncStatus,
+    requests: [
+      {
+        id: 'req-1',
+        conversationId: 'conv-1',
+        deviceId: 'dev-1',
+        deviceName: 'PC-Perso',
+        isRemotePeer: false,
+        accountEmail: 'user@example.com',
+        model: 'Gemini 4 Carbon (High)',
+        timestampMs: now - 1000,
+        inputTokens: 100,
+        cacheReadTokens: 200,
+        outputTokens: 50,
+        cacheHitPercent: 66.7,
+        status: 'success',
+        tps: 80,
+        ttftMs: 500,
+        costUsd: 0.01
+      },
+      {
+        id: 'req-2',
+        conversationId: 'conv-2',
+        deviceId: 'dev-2',
+        deviceName: 'PC-Boulot',
+        isRemotePeer: true,
+        accountEmail: 'user@example.com',
+        model: 'Gemini 4 Neon (High)',
+        timestampMs: now - 2000,
+        inputTokens: 300,
+        cacheReadTokens: 100,
+        outputTokens: 80,
+        cacheHitPercent: 25,
+        status: 'success',
+        tps: 90,
+        ttftMs: 400,
+        costUsd: 0.02
+      }
+    ],
+    errors: []
+  };
+
+  const ctx = vm.createContext({
+    document: {
+      head: { append() {} },
+      createElement: () => ({ dataset: {}, textContent: '', remove() {} }),
+      createTreeWalker: () => ({ nextNode: () => null }),
+      querySelectorAll: () => []
+    },
+    NodeFilter: { SHOW_TEXT: 4 },
+    MutationObserver: class { observe() {} disconnect() {} },
+    URL,
+    window: { addEventListener() {}, removeEventListener() {} },
+    navigator: { platform: 'Win32', userAgent: '' },
+    location: { pathname: '/powertools' },
+    setTimeout: () => 1,
+    clearTimeout() {},
+    __agyToZhTw: toZhTw,
+    React: {
+      Fragment: Symbol('Fragment'),
+      createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
+      useId: () => 'id-sync',
+      useState: init => {
+        const key = `${currentComp}:${slotIdx++}`;
+        if (!states.has(key)) states.set(key, typeof init === 'function' ? init() : init);
+        return [states.get(key), next => { states.set(key, typeof next === 'function' ? next(states.get(key)) : next); }];
+      },
+      useEffect: fn => { fn(); },
+      useRef: v => ({ current: v }),
+      useMemo: fn => fn(),
+      useCallback: fn => fn,
+      useSyncExternalStore: (_, g) => g()
+    },
+    HC: ({ children }) => children,
+    IC: ({ children }) => children,
+    JC: ({ children }) => children,
+    KC: ({ children }) => children,
+    GC: ({ children }) => children,
+    kT: ({ children }) => children,
+    lT: ({ children }) => children,
+    mT: ({ children }) => children,
+    nT: props => ({ type: 'menu-item', props, children: props.children || [] }),
+    Uy: props => ({ type: 'button', props, children: props.children || [] }),
+    XP: props => ({ type: 'switch', props, children: [] }),
+    UP: props => ({ type: 'row', props, children: [props.label, props.description, props.rightElement, props.extraContent] }),
+    TP: ({ children }) => ({ type: 'card', props: {}, children }),
+    VP: ({ children }) => ({ type: 'section', props: {}, children }),
+    dq: props => ({ type: 'icon', props, children: [] }),
+    Sy: ({ children }) => children,
+    Wz: ({ children }) => children
+  });
+  vm.runInContext(`(() => { ${dashboardSrc}; globalThis.__agyDashboard = { modelIdentity, timestampToMs, resolveWeeklyQuotaWindow, dateRange, summarizeRequests, subscriptionIdentity, distributionModels, annotateCacheAnomalies }; })();`, ctx);
+  vm.runInContext(i18nSrc, ctx);
+  vm.runInContext(panelsSrc, ctx);
+
+  const expandStateful = node => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(expandStateful);
+    if (typeof node.type === 'function') {
+      const prevComp = currentComp, prevSlot = slotIdx;
+      currentComp = node.type.name || 'anon';
+      slotIdx = 0;
+      const out = node.type({ ...(node.props || {}), children: node.children });
+      const res = expandStateful(out);
+      currentComp = prevComp;
+      slotIdx = prevSlot;
+      return res;
+    }
+    return { ...node, children: Array.isArray(node.children) ? node.children.map(expandStateful) : node.children };
+  };
+
+  const panels = ctx.__agyPanels({
+    adapter: { router: () => ({ navigate() {} }) },
+    t: s => s,
+    version: '2.16.14',
+    platform: 'win32',
+    defaults: { enabled: true, language: 'fr' },
+    project: { name: 'Agy Powertools', githubUrl: '', subscriptionUrl: '' },
+    options: () => opts,
+    dashboard: () => dashboardData,
+    state: () => ({ contextWindow: { maxTokens: 1000000 } }),
+    capabilities: () => ({ email: 'user@example.com', models: [] }),
+    settingsError: () => '',
+    proxyStatus: () => null,
+    loadProxyStatus: async () => null,
+    loadSyncStatus: async () => syncStatus,
+    runUsageSync: async () => {
+      runSyncCalls++;
+      syncStatus = {
+        ...syncStatus,
+        enabled: true,
+        peers: [{ deviceId: 'dev-2', deviceName: 'PC-Boulot', kind: 'device', requestCount: 1 }]
+      };
+      return { ok: true, status: syncStatus };
+    },
+    change: async patch => {
+      changeCalls.push(patch);
+      opts = { ...opts, ...patch };
+    },
+    subscribe: () => () => {},
+    revision: () => 0
+  });
+
+  const renderSettings = () => expandStateful({ type: panels.Settings, props: {}, children: [] });
+  let tree = renderSettings();
+  findByTestId(tree, 'agy-settings-cat-system').props.onClick();
+  tree = renderSettings();
+
+  const masterSwitch = findByTestId(tree, 'agy-setting-syncEnabled');
+  assert.ok(masterSwitch);
+  assert.equal(findByTestId(tree, 'agy-sync-dir-input'), null);
+
+  // Enabling syncEnabled previously crashed with ReferenceError: toggle is not defined
+  await masterSwitch.props.onCheckedChange(true);
+  tree = renderSettings();
+  assert.ok(findByTestId(tree, 'agy-sync-device-name-input'));
+  assert.ok(findByTestId(tree, 'agy-sync-dir-input'));
+  assert.ok(findByTestId(tree, 'agy-sync-ssh-hosts-input'));
+  assert.ok(findByTestId(tree, 'agy-sync-save-btn'));
+  const syncNowBtn = findByTestId(tree, 'agy-sync-now-btn');
+  const privacySwitch = findByTestId(tree, 'agy-setting-syncPrivacyMode');
+  assert.ok(syncNowBtn && privacySwitch);
+
+  await privacySwitch.props.onCheckedChange(true);
+  assert.equal(changeCalls.at(-1)?.syncPrivacyMode, true);
+
+  await syncNowBtn.props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = renderSettings();
+  assert.equal(runSyncCalls, 1);
+  const feedback = findByTestId(tree, 'agy-sync-feedback');
+  assert.ok(feedback);
+  assert.equal(feedback.props['data-tone'], 'ok');
+  assert.doesNotMatch(collectText(feedback), /[\u00b7\u2022\u2027\u30fb]/);
+
+  // Overview and EventTable device filter
+  const renderOverview = () => expandStateful({ type: panels.Overview, props: { dashboard: dashboardData }, children: [] });
+  const renderRequests = () => expandStateful({ type: panels.EventTable, props: { dashboard: dashboardData }, children: [] });
+
+  let ovTree = renderOverview();
+  assert.ok(findByTestId(ovTree, 'agy-overview-device-filter'));
+  assert.ok(findByTestId(ovTree, 'agy-overview-device-filter-all'));
+  assert.ok(findByTestId(ovTree, 'agy-overview-device-filter-dev-1'));
+  const ovDev2 = findByTestId(ovTree, 'agy-overview-device-filter-dev-2');
+  assert.ok(ovDev2);
+  ovDev2.props.onClick();
+  ovTree = renderOverview();
+  assert.equal(findByTestId(ovTree, 'agy-overview-device-filter-dev-2').props.selected, true);
+
+  let reqTree = renderRequests();
+  assert.ok(findByTestId(reqTree, 'agy-device-filter'));
+  assert.equal(collectAllByTestId(reqTree, 'agy-request-device').length, 2);
+  findByTestId(reqTree, 'agy-device-filter-dev-2').props.onClick();
+  reqTree = renderRequests();
+  assert.equal(findByTestId(reqTree, 'agy-device-filter-dev-2').props.selected, true);
+  assert.equal(collectAllByTestId(reqTree, 'agy-request-device').length, 0);
+  assert.match(collectText(findByTestId(reqTree, 'agy-requests-table')), /Gemini 4 Neon/);
+  assert.doesNotMatch(collectText(findByTestId(reqTree, 'agy-requests-table')), /Gemini 4 Carbon/);
+
+  panels.dispose();
 });
