@@ -1680,6 +1680,33 @@ test('scripts/launch-macos.mjs builds live-config plans, scrubs env, uses open -
   }
 });
 
+test('macOS direct launcher skips the Electron Helper and repairs an existing wrapper (Issue #126)', async () => {
+  const { createMacDirectLauncher } = await import('../lib/launcher.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'agy-mac-launcher-helper-'));
+  try {
+    const dataDir = join(home, 'data');
+    const sourceApp = join(home, 'Applications', "Antigravity's Build.app");
+    const helper = join(sourceApp, 'Contents', 'Frameworks', 'Antigravity Helper.app', 'Contents', 'MacOS', 'Antigravity Helper');
+    mkdirSync(sourceApp, { recursive: true });
+    const options = { home, dataDir, platform: 'darwin', sandbox: true, env: {}, execPath: helper, macSourceApp: sourceApp };
+    const created = createMacDirectLauncher({ ...options, nodePath: helper });
+    const launcher = join(created.appPath, 'Contents', 'MacOS', 'launcher');
+    const fixed = readFileSync(launcher, 'utf8');
+    assert.match(fixed, /^RECORDED_NODE=''$/m);
+
+    const escapedHelper = helper.replaceAll("'", "'\\''");
+    const legacy = fixed.replace("RECORDED_NODE=''", `RECORDED_NODE='${escapedHelper}'`);
+    writeFileSync(launcher, legacy);
+    const repaired = configureLaunchers(options);
+    assert.deepEqual(repaired.updated, [created.appPath]);
+    assert.equal(repaired.preservedMacDirectLauncher, true);
+    assert.equal(readFileSync(launcher, 'utf8'), fixed);
+    assert.deepEqual(configureLaunchers(options).updated, []);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('macOS opt-in direct launcher .app API creates, inspects, reveals, preserves/refreshes icon on upgrade, and cleans up on remove/uninstall (Issues #87 & #101)', async () => {
   const {
     MAC_DIRECT_LAUNCHER_BUNDLE_ID,
