@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { annotateCacheAnomalies } from '../lib/dashboard.mjs';
 import { createQuotaTracker } from '../lib/quota.mjs';
 import { createSettingsStore } from '../lib/settings.mjs';
+import { discoverKnownSshHosts } from '../lib/ssh-remote.mjs';
 import {
   buildPeerSnapshot,
   createUsageSyncCoordinator,
@@ -362,6 +363,42 @@ test('scripts/sync.mjs CLI supports init, set-dir, add-ssh, remove-ssh, sync, an
     const syncRes = await runSyncCli(['sync', '--home', fakeHome, '--email', 'user@example.com', '--json'], { env: {} });
     assert.equal(syncRes.payload.ok, true);
     assert.equal(JSON.stringify(syncRes.payload).includes('\u00b7'), false);
+
+    const promptRes = await runSyncCli(['prompt', '--home', fakeHome, '--dir', syncDir, '--ssh', 'nas-tailscale', '--privacy', 'on', '--json'], { env: {} });
+    assert.equal(promptRes.payload.ok, true);
+    assert.match(promptRes.payload.prompt, /SYNC_AGENT\.md/);
+    assert.match(promptRes.payload.prompt, /--ssh "nas-tailscale"/);
+    assert.match(promptRes.payload.prompt, /--privacy on/);
+    assert.equal(promptRes.payload.prompt.includes('\u00b7'), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('discoverKnownSshHosts collects unique valid hosts from ssh_windows.json, app_storage.json, and ~/.ssh/config', () => {
+  const root = mkdtempSync(join(tmpdir(), 'agy-ssh-discover-'));
+  try {
+    const userDataDir = join(root, 'Antigravity');
+    const home = join(root, 'home');
+    mkdirSync(userDataDir, { recursive: true });
+    mkdirSync(join(home, '.ssh'), { recursive: true });
+
+    writeFileSync(join(userDataDir, 'ssh_windows.json'), JSON.stringify({
+      windows: [{ host: 'nas-tailscale' }, { host: '-bad-host' }]
+    }));
+    writeFileSync(join(userDataDir, 'app_storage.json'), JSON.stringify({
+      'ssh.recentConnections': JSON.stringify([{ host: 'work-vps' }, { host: 'nas-tailscale' }])
+    }));
+    writeFileSync(join(home, '.ssh', 'config'), [
+      '# Commented host',
+      'Host * !bastion *.internal',
+      'Host nas-tailscale media-nas # trailing comment',
+      '  User macu',
+      'Host db;bad'
+    ].join('\n'));
+
+    const discovered = discoverKnownSshHosts({ userDataDir, home });
+    assert.deepEqual(discovered, ['nas-tailscale', 'work-vps', 'media-nas']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

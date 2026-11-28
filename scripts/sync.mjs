@@ -5,7 +5,7 @@ import { installationPaths } from '../lib/lifecycle.mjs';
 import { createQuotaTracker } from '../lib/quota.mjs';
 import { createSettingsStore } from '../lib/settings.mjs';
 import { createRemoteTelemetryBridge, validateSshDestination } from '../lib/ssh-remote.mjs';
-import { createUsageSyncCoordinator, parseSyncSshHosts, resolveSyncDir } from '../lib/usage-sync.mjs';
+import { buildAgentSyncPrompt, createUsageSyncCoordinator, parseSyncSshHosts, resolveSyncDir } from '../lib/usage-sync.mjs';
 
 function parseCliArgs(argv) {
   const positionals = [];
@@ -83,6 +83,9 @@ function parseCliArgs(argv) {
 }
 
 function formatTextReport(result) {
+  if (result?.command === 'prompt' && typeof result.prompt === 'string') {
+    return result.prompt;
+  }
   const st = result.status || result;
   const lines = [
     `Device: ${st.deviceName} (${st.deviceId})`,
@@ -125,7 +128,8 @@ export async function runSyncCli(argv = process.argv.slice(2), { env = process.e
     settingsGetter: () => settings.get(),
     quotaTracker: quota,
     remoteBridge,
-    env
+    env,
+    home: paths.home
   });
 
   let payload;
@@ -229,6 +233,14 @@ export async function runSyncCli(argv = process.argv.slice(2), { env = process.e
       localRequestCount: merged.requests.filter(r => !r.isRemotePeer).length,
       totalMergedRequests: merged.totalRequests
     };
+  } else if (command === 'prompt') {
+    const st = coordinator.status();
+    const prompt = buildAgentSyncPrompt({
+      syncDir: flags.dir || st.syncDir || '',
+      sshHosts: flags.ssh || st.sshHosts || [],
+      privacyMode: flags.privacy !== null ? flags.privacy : st.privacyMode
+    });
+    payload = { ok: true, command, prompt, status: st };
   } else {
     throw new Error(`Unknown sync command: ${command}`);
   }

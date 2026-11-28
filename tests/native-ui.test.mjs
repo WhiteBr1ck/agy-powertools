@@ -5373,8 +5373,10 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
   };
 
   const states = new Map();
+  const effects = new Map();
   let currentComp = null;
   let slotIdx = 0;
+  let effIdx = 0;
   let opts = {
     enabled: true,
     language: 'fr',
@@ -5398,10 +5400,12 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
     syncDir: '',
     resolvedSyncDir: '',
     sshHosts: [],
+    discoveredSshHosts: ['nas', 'vps'],
     privacyMode: false,
     peers: [],
     lastError: ''
   };
+  const copiedTexts = [];
   const now = Date.now();
   const dashboardData = {
     activeAccountEmail: 'user@example.com',
@@ -5463,7 +5467,11 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
     MutationObserver: class { observe() {} disconnect() {} },
     URL,
     window: { addEventListener() {}, removeEventListener() {} },
-    navigator: { platform: 'Win32', userAgent: '' },
+    navigator: {
+      platform: 'Win32',
+      userAgent: '',
+      clipboard: { writeText: async txt => { copiedTexts.push(txt); } }
+    },
     location: { pathname: '/powertools' },
     setTimeout: () => 1,
     clearTimeout() {},
@@ -5477,7 +5485,15 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
         if (!states.has(key)) states.set(key, typeof init === 'function' ? init() : init);
         return [states.get(key), next => { states.set(key, typeof next === 'function' ? next(states.get(key)) : next); }];
       },
-      useEffect: fn => { fn(); },
+      useEffect: (fn, deps) => {
+        const key = `${currentComp}:eff:${effIdx++}`;
+        const prev = effects.get(key);
+        const changed = !prev || !Array.isArray(deps) || deps.length !== prev.length || deps.some((d, i) => !Object.is(d, prev[i]));
+        if (changed) {
+          effects.set(key, Array.isArray(deps) ? [...deps] : null);
+          fn();
+        }
+      },
       useRef: v => ({ current: v }),
       useMemo: fn => fn(),
       useCallback: fn => fn,
@@ -5509,13 +5525,15 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
     if (!node || typeof node !== 'object') return node;
     if (Array.isArray(node)) return node.map(expandStateful);
     if (typeof node.type === 'function') {
-      const prevComp = currentComp, prevSlot = slotIdx;
+      const prevComp = currentComp, prevSlot = slotIdx, prevEff = effIdx;
       currentComp = node.type.name || 'anon';
       slotIdx = 0;
+      effIdx = 0;
       const out = node.type({ ...(node.props || {}), children: node.children });
       const res = expandStateful(out);
       currentComp = prevComp;
       slotIdx = prevSlot;
+      effIdx = prevEff;
       return res;
     }
     return { ...node, children: Array.isArray(node.children) ? node.children.map(expandStateful) : node.children };
@@ -5575,6 +5593,35 @@ test('MultiDeviceSyncSection renders without toggle error when enabled, runs syn
 
   await privacySwitch.props.onCheckedChange(true);
   assert.equal(changeCalls.at(-1)?.syncPrivacyMode, true);
+
+  // 1-click SSH host chips toggle host in input and Copy Agent setup prompt copies prompt
+  assert.ok(findByTestId(tree, 'agy-sync-ssh-suggestions'));
+  const nasChip = findByTestId(tree, 'agy-sync-ssh-chip-nas');
+  assert.ok(nasChip);
+  assert.equal(nasChip.props['aria-pressed'], false);
+  nasChip.props.onClick();
+  tree = renderSettings();
+  assert.equal(findByTestId(tree, 'agy-sync-ssh-hosts-input').props.value, 'nas');
+  assert.equal(findByTestId(tree, 'agy-sync-ssh-chip-nas').props['aria-pressed'], true);
+
+  const copyPromptBtn = findByTestId(tree, 'agy-sync-copy-prompt-btn');
+  assert.ok(copyPromptBtn);
+  await copyPromptBtn.props.onClick();
+  await new Promise(r => setImmediate(r));
+  tree = renderSettings();
+  assert.equal(copiedTexts.length, 1);
+  assert.match(copiedTexts[0], /SYNC_AGENT\.md/);
+  assert.match(copiedTexts[0], /--ssh "nas"/);
+  assert.doesNotMatch(copiedTexts[0], /[\u00b7\u2022\u2027\u30fb]/);
+  const copyFeedback = findByTestId(tree, 'agy-sync-feedback');
+  assert.ok(copyFeedback);
+  assert.equal(copyFeedback.props['data-tone'], 'ok');
+  assert.doesNotMatch(collectText(copyFeedback), /[\u00b7\u2022\u2027\u30fb]/);
+
+  // Toggle chip off removes host cleanly
+  findByTestId(tree, 'agy-sync-ssh-chip-nas').props.onClick();
+  tree = renderSettings();
+  assert.equal(findByTestId(tree, 'agy-sync-ssh-hosts-input').props.value, '');
 
   await syncNowBtn.props.onClick();
   await new Promise(r => setImmediate(r));
