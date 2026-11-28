@@ -565,6 +565,63 @@ test('native-host settings.export and settings.import RPCs strip proxy credentia
   }
 });
 
+test('multi-device sync settings validate, normalize SSH hosts, and keep local-only keys out of portable exports', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agy-sync-settings-'));
+  try {
+    const store = createSettingsStore(dir);
+    const initial = store.get();
+    assert.equal(initial.syncEnabled, false);
+    assert.equal(initial.syncDir, '');
+    assert.equal(initial.syncDeviceName, '');
+    assert.equal(initial.syncSshHosts, '');
+    assert.equal(initial.syncPrivacyMode, false);
+
+    const updated = store.set({
+      syncEnabled: true,
+      syncDir: '  C:\\Sync\\agy-powertools  ',
+      syncDeviceName: '  PC-Perso  ',
+      syncSshHosts: 'nas, user@100.64.0.2:2222 ; nas',
+      syncPrivacyMode: true
+    });
+    assert.equal(updated.syncEnabled, true);
+    assert.equal(updated.syncDir, 'C:\\Sync\\agy-powertools');
+    assert.equal(updated.syncDeviceName, 'PC-Perso');
+    assert.equal(updated.syncSshHosts, 'nas, user@100.64.0.2:2222');
+    assert.equal(updated.syncPrivacyMode, true);
+
+    assert.throws(() => store.set({ syncSshHosts: '-oProxyCommand=calc' }), /设置选项无效/);
+    assert.throws(() => store.set({ syncSshHosts: 'nas;rm -rf /' }), /设置选项无效/);
+    assert.throws(() => store.set({ syncDir: 'bad\npath' }), /设置选项无效/);
+
+    const exported = exportSettingsPayload(store.get());
+    for (const localKey of ['syncEnabled', 'syncDir', 'syncDeviceName', 'syncSshHosts']) {
+      assert.equal(NON_PORTABLE_SETTING_KEYS.has(localKey), true);
+      assert.equal(Object.hasOwn(exported.settings, localKey), false);
+    }
+    assert.equal(exported.settings.syncPrivacyMode, true);
+
+    const sanitized = sanitizeImportedSettings({
+      format: SETTINGS_EXPORT_FORMAT,
+      schemaVersion: 1,
+      settings: {
+        syncEnabled: false,
+        syncDir: 'D:\\Other',
+        syncDeviceName: 'Other',
+        syncSshHosts: 'other-nas',
+        syncPrivacyMode: false,
+        compact: true
+      }
+    });
+    assert.equal(sanitized.patch.syncPrivacyMode, false);
+    assert.equal(Object.hasOwn(sanitized.patch, 'syncEnabled'), false);
+    assert.equal(Object.hasOwn(sanitized.patch, 'syncDir'), false);
+    assert.equal(Object.hasOwn(sanitized.patch, 'syncDeviceName'), false);
+    assert.equal(Object.hasOwn(sanitized.patch, 'syncSshHosts'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('Beta AI settings default off, validate provider::model refs, and keep outbound toggles and model refs non-portable', () => {
   assert.deepEqual([...THINKING_TRANSLATE_ENGINES], ['free', 'ai']);
   assert.deepEqual([...THINKING_DISPLAY_MODES], ['replace', 'bilingual']);

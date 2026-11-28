@@ -206,6 +206,7 @@ sh ./install.sh
 | 붙여넣은 SSH 명령 인식 | 켜짐 | 새 프로젝트 -> SSH Host에 `ssh -p PORT user@host`를 붙여넣으면 `user@host:port`를 자동 추출합니다(붙여넣은 비밀번호는 무시) |
 | 다중 계정 전환 사용 | 꺼짐 | 위험 안내 확인 후 활성화; 사이드바 전환기, 목록/카드 보기, 5시간/주간 전환 및 자동 전환을 제공합니다 |
 | 앱 전용 프록시 (비-TUN) | 꺼짐 | 프로토콜/호스트/포트 설정, 연결 테스트, 콜드 스타트 안내 및 강제 HTTP/1.1을 제공합니다 |
+| 다중 기기 사용량 동기화 | 꺼짐 | 공유 폴더(`syncDir`) 또는 SSH(`syncSshHosts`, 감지된 호스트 원클릭 선택 지원)로 여러 기기의 사용 통계를 병합하며 대화 내용은 동기화하지 않습니다. 기기별 필터 및 도넛 차트, Agent 프롬프트 복사, `scripts/sync.mjs`, [SYNC_AGENT.md](./SYNC_AGENT.md) 포함 |
 | 컨텍스트 목표 (실험적) | `기본값` | `기본값`, `256K`, `500K`, `1M` 중 선택합니다(`기본값`은 클라이언트 기본 설정을 변경하지 않음) |
 
 ### 환경 변수 및 경로
@@ -214,6 +215,8 @@ sh ./install.sh
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | 격리된 프로필을 위한 사용자 지정 Antigravity 사용자 데이터 디렉터리 |
 | `ANTIGRAVITY_CLI_DATA_DIR` | 사용자 지정 `agy` CLI 데이터 디렉터리 (기본값: `~/.gemini/antigravity-cli`) |
+| `AGY_POWERTOOLS_SYNC_DIR` | 다중 기기 사용량 동기화 기본 공유 폴더 경로 |
+| `AGY_POWERTOOLS_DEVICE_NAME` | 기기 필터에 표시되는 기본 기기 이름 |
 | `ANTIGRAVITY_CDP_PORT_FILE` | `DevToolsActivePort`의 명시적 경로 (`AGY_BROWSER_ACTIVE_PORT_FILE`도 지원) |
 | `~/.gemini/config/plugins/agy-powertools/` | 설치된 플러그인 파일 및 런타임 스크립트 |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | 저장된 설정, 계정 메타데이터, 할당량 샘플 및 요금 캐시 |

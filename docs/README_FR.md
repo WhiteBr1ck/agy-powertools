@@ -206,6 +206,7 @@ Chaque réglage s'applique en temps réel dans **Powertools -> Paramètres** et 
 | Reconnaître les commandes SSH collées | Activé | Extrait `user@host:port` lors du collage de `ssh -p PORT user@host` dans Nouveau projet -> SSH Host (ignore les mots de passe ajoutés) |
 | Activer le changement multi-compte | Désactivé | Activation volontaire avec avis de risque ; sélecteur latéral, vues liste/cartes, bascule 5H/hebdo et changement automatique |
 | Proxy applicatif (sans TUN) | Désactivé | Champs protocole/hôte/port, tests de connectivité, invitation au démarrage à froid et option Forcer HTTP/1.1 |
+| Synchronisation multi-appareils | Désactivé | Fusionne les stats d'utilisation entre appareils via un dossier partagé (`syncDir`) ou SSH (`syncSshHosts`, avec sélection en 1 clic des hôtes détectés) sans synchroniser les chats ; inclut le filtre d'appareil, le graphique Répartition par appareil dans Aperçu, Copier le prompt Agent, `scripts/sync.mjs` et [SYNC_AGENT.md](./SYNC_AGENT.md) |
 | Cible de contexte (Expérimental) | `Par défaut` | Choisir `Par défaut`, `256K`, `500K` ou `1M` (`Par défaut` laisse les réglages natifs intacts) |
 
 ### Variables d'environnement et chemins
@@ -214,6 +215,8 @@ Chaque réglage s'applique en temps réel dans **Powertools -> Paramètres** et 
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | Répertoire de données utilisateur Antigravity personnalisé pour les profils isolés |
 | `ANTIGRAVITY_CLI_DATA_DIR` | Répertoire de données `agy` CLI personnalisé (`~/.gemini/antigravity-cli` par défaut) |
+| `AGY_POWERTOOLS_SYNC_DIR` | Dossier partagé par défaut pour la synchronisation multi-appareils |
+| `AGY_POWERTOOLS_DEVICE_NAME` | Nom d'appareil par défaut affiché dans les filtres multi-appareils |
 | `ANTIGRAVITY_CDP_PORT_FILE` | Chemin explicite vers `DevToolsActivePort` (prend aussi en charge `AGY_BROWSER_ACTIVE_PORT_FILE`) |
 | `~/.gemini/config/plugins/agy-powertools/` | Fichiers du plugin installés et scripts d'exécution |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | Paramètres enregistrés, métadonnées de comptes, échantillons de quota et cache tarifaire |

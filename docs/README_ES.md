@@ -206,6 +206,7 @@ Cada ajuste se aplica al instante en **Powertools -> Configuración** y se guard
 | Reconocer comandos SSH pegados | Activado | Extrae `user@host:port` al pegar `ssh -p PORT user@host` en Crear nuevo proyecto -> SSH Host (descarta contraseñas adjuntas) |
 | Activar cambio entre varias cuentas | Desactivado | Activación opcional con aviso de riesgos; selector en barra lateral, vista de lista/tarjetas, selector 5H/semanal y cambio automático |
 | Proxy de aplicación (sin TUN) | Desactivado | Campos de protocolo/host/puerto, pruebas de conectividad, aviso en inicio en frío y Forzar HTTP/1.1 |
+| Sincronización de uso multidispositivo | Desactivado | Fusiona estadísticas de uso entre dispositivos mediante carpeta compartida (`syncDir`) o SSH (`syncSshHosts`, con hosts detectados en 1 clic) sin sincronizar chats; incluye filtro y gráfico Uso por dispositivo, copia de prompt para Agente, `scripts/sync.mjs` y [SYNC_AGENT.md](./SYNC_AGENT.md) |
 | Objetivo de contexto (Experimental) | `Predeterminado` | Elige `Predeterminado`, `256K`, `500K` o `1M` (`Predeterminado` no modifica la configuración nativa) |
 
 ### Variables de entorno y rutas
@@ -214,6 +215,8 @@ Cada ajuste se aplica al instante en **Powertools -> Configuración** y se guard
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | Directorio personalizado de datos de usuario de Antigravity para perfiles aislados |
 | `ANTIGRAVITY_CLI_DATA_DIR` | Directorio personalizado de datos de `agy` CLI (por defecto `~/.gemini/antigravity-cli`) |
+| `AGY_POWERTOOLS_SYNC_DIR` | Ruta predeterminada de la carpeta compartida para sincronización multidispositivo |
+| `AGY_POWERTOOLS_DEVICE_NAME` | Nombre de dispositivo predeterminado mostrado en los filtros multidispositivo |
 | `ANTIGRAVITY_CDP_PORT_FILE` | Ruta explícita a `DevToolsActivePort` (también respeta `AGY_BROWSER_ACTIVE_PORT_FILE`) |
 | `~/.gemini/config/plugins/agy-powertools/` | Archivos instalados del plugin y scripts de ejecución |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | Configuración guardada, metadatos de cuentas, muestras de cuota y caché de precios |
