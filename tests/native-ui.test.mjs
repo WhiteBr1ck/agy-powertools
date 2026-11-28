@@ -5735,9 +5735,41 @@ test('Issues #115/#116: muted & icon-only composer indicators (main + subagent),
   assert.equal(findById(haloTree, 'agy-composer-quota-halo').props['data-window'], '5h');
   assert.equal(findById(haloTree, 'agy-composer-quota-halo').props['data-percent'], '88');
 
-  // 3. Responsive @container input-footer CSS rules cover agy-composer-quota-trigger, and NativeEntry has no useRevision() (Issue #89)
-  assert.match(source, /@container input-footer \(max-width: 500px\)[\s\S]*agy-composer-quota-trigger/);
-  assert.match(source, /@container input-footer \(max-width: 240px\)[\s\S]*agy-composer-quota-trigger/);
+  // Dual mode (composerQuotaWindow='both') renders both 5h (bolt) and weekly (calendar) indicators cleanly
+  const rendersBeforeBoth = ringRenderCount;
+  await env.change({ composerQuotaWindow: 'both', composerIndicatorTone: 'semantic', composerIndicatorCompact: false });
+  assert.ok(ringRenderCount > rendersBeforeBoth, 'composerRingSig must re-render on composerQuotaWindow="both"');
+  mainTree = renderTree(renderedByKind.get('ring'));
+  const dual5h = findById(mainTree, 'agy-composer-quota-trigger');
+  const dualWeekly = findById(mainTree, 'agy-composer-quota-weekly-trigger');
+  assert.ok(dual5h && dualWeekly, 'composerQuotaWindow="both" must render both 5h and weekly quota triggers');
+  assert.equal(dual5h.props['data-window'], '5h');
+  assert.equal(dual5h.props['data-percent'], '88');
+  assert.equal(dual5h.props.style.color, 'var(--success)');
+  assert.ok(collectText(dual5h).includes('88%'));
+  assert.equal(dualWeekly.props['data-window'], 'weekly');
+  assert.equal(dualWeekly.props['data-percent'], '42');
+  assert.equal(dualWeekly.props.style.color, 'var(--warning)');
+  assert.ok(collectText(dualWeekly).includes('42%'));
+  assert.equal(findAll(dualWeekly, n => n.type === 'rect').length, 1, 'weekly dual trigger must render minimalist calendar icon');
+  assert.equal(findAll(dualWeekly, n => n.type === 'line').length, 1, 'weekly dual trigger calendar icon must include header line');
+  assert.ok(findById(mainTree, 'agy-composer-quota-weekly-popover'), 'weekly dual trigger must open quota details popover');
+
+  // Dual mode respects muted & compact settings on both triggers
+  await env.change({ composerIndicatorTone: 'muted', composerIndicatorCompact: true });
+  mainTree = renderTree(renderedByKind.get('ring'));
+  for (const id of ['agy-composer-quota-trigger', 'agy-composer-quota-weekly-trigger']) {
+    const btn = findById(mainTree, id);
+    assert.ok(btn, `Expected ${id} in muted+compact dual mode`);
+    assert.equal(btn.props.style.color, undefined);
+    assert.equal(btn.props.size, 'icon');
+    assert.equal(btn.props['data-indicator-tone'], 'muted');
+    assert.equal(btn.props['data-indicator-compact'], 'true');
+  }
+
+  // 3. Responsive @container input-footer CSS rules cover both quota triggers, and NativeEntry has no useRevision() (Issue #89)
+  assert.match(source, /@container input-footer \(max-width: 500px\)[\s\S]*agy-composer-quota-trigger[\s\S]*agy-composer-quota-weekly-trigger/);
+  assert.match(source, /@container input-footer \(max-width: 240px\)[\s\S]*agy-composer-quota-trigger[\s\S]*agy-composer-quota-weekly-trigger/);
   const nativeEntrySrc = source.slice(source.indexOf('function NativeEntry('), source.indexOf('function ToolDetails('));
   assert.equal(nativeEntrySrc.includes('useRevision'), false, 'NativeEntry must not call useRevision() to preserve Issue #89 IME guard');
 

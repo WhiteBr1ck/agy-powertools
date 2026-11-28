@@ -93,6 +93,8 @@ test('settings persist, merge safely, and reject unknown options without changin
     assert.equal(store.get().composerQuotaWindow, '5h');
     assert.equal(store.get().composerQuotaHaloWindow, '5h');
     assert.equal(store.get().composerWorkingBeamPalette, 'quota');
+    store.set({ composerQuotaWindow: 'both' });
+    assert.equal(store.get().composerQuotaWindow, 'both');
     store.set({ overviewQuota: false, composerQuota: false, composerQuotaWindow: 'auto', composerIndicatorTone: 'semantic', composerIndicatorCompact: false, composerQuotaHalo: false, composerQuotaHaloWindow: 'auto', composerQuotaHaloTone: 'semantic', composerWorkingBeam: false, composerWorkingBeamPalette: 'gemini' });
     assert.equal(store.get().messageEdit, true);
     assert.equal(store.get().fileContextMenu, true);

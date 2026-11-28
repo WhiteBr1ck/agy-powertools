@@ -2570,6 +2570,8 @@ test('Issues #115/#116: Settings places halo tone, indicator tone/compact, compo
   assert.deepEqual({ ...changes.at(-1) }, { composerQuotaWindow: '5h' });
   ui.find(quotaWinDrawer, 'agy-composer-quota-window-weekly').props.onClick();
   assert.deepEqual({ ...changes.at(-1) }, { composerQuotaWindow: 'weekly' });
+  ui.find(quotaWinDrawer, 'agy-composer-quota-window-both').props.onClick();
+  assert.deepEqual({ ...changes.at(-1) }, { composerQuotaWindow: 'both' });
   ui.find(tree, 'agy-setting-composerQuota').props.onCheckedChange(false);
   assert.deepEqual({ ...changes.at(-1) }, { composerQuota: false });
   ui.find(tree, 'agy-setting-composerQuota').props.onCheckedChange(true);
