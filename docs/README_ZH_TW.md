@@ -206,6 +206,7 @@ sh ./install.sh
 | 辨識貼上的 SSH 指令 | 開啟 | 在「新增專案 -> SSH Host」貼上 `ssh -p 連接埠 使用者@主機` 時自動填入 `使用者@主機:連接埠`（自動忽略密碼） |
 | 啟用多帳號切換 | 關閉 | 須確認風險提示；含側邊欄切換器、清單/卡片檢視、5H/週限額切換與耗盡自動切號 |
 | 啟用獨立代理（免 TUN） | 關閉 | 協定 / 主機 / 連接埠輸入、連通性測試、冷啟動提醒與強制 HTTP/1.1 |
+| 多裝置用量同步 | 關閉 | 透過共用資料夾（`syncDir`）或 SSH（`syncSshHosts`，支援一鍵切換偵測到的 SSH 主機）彙整多台裝置的用量統計，不同步對話內容；總覽支援裝置篩選與「裝置用量分佈」環形圖，並內建複製 Agent 設定提示詞、`scripts/sync.mjs` 與 [SYNC_AGENT.md](./SYNC_AGENT.md) |
 | 上下文目標（實驗性） | `預設` | 可選 `預設`、`256K`、`500K`、`1M`；`預設` 不更動用戶端原生設定 |
 
 ### 環境變數與檔案路徑
@@ -214,6 +215,8 @@ sh ./install.sh
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | 使用獨立用戶端設定目錄時指定自訂使用者資料目錄 |
 | `ANTIGRAVITY_CLI_DATA_DIR` | 自訂 `agy` CLI 資料目錄路徑（預設自動合併 `~/.gemini/antigravity-cli`） |
+| `AGY_POWERTOOLS_SYNC_DIR` | 多裝置用量同步的預設共用資料夾路徑 |
+| `AGY_POWERTOOLS_DEVICE_NAME` | 多裝置篩選器中顯示的預設裝置名稱 |
 | `ANTIGRAVITY_CDP_PORT_FILE` | 明確指定 `DevToolsActivePort` 絕對路徑（相容 `AGY_BROWSER_ACTIVE_PORT_FILE`） |
 | `~/.gemini/config/plugins/agy-powertools/` | 外掛程式與執行腳本安裝目錄 |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | 個人設定、帳號記錄、配額採樣與參考單價快取目錄 |

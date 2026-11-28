@@ -206,6 +206,7 @@ Alle Einstellungen greifen sofort unter **Powertools -> Einstellungen** und werd
 | Eingefügte SSH-Befehle erkennen | Ein | Extrahiert `user@host:port`, wenn `ssh -p PORT user@host` in „Neues Projekt -> SSH Host“ eingefügt wird (angehängte Passwörter werden verworfen) |
 | Multi-Konto-Wechsel aktivieren | Aus | Opt-in mit Risikohinweis; Seitenleisten-Wechsler, Listen-/Kartenansicht, 5H-/Wochen-Umschalter und automatischer Wechsel |
 | App-Proxy (ohne TUN) | Aus | Protokoll-/Host-/Port-Felder, Verbindungsprüfung, Kaltstart-Hinweis und HTTP/1.1 erzwingen |
+| Multi-Geräte-Nutzungssync | Aus | Nutzungsstatistiken mehrerer Geräte über einen freigegebenen Ordner (`syncDir`) oder SSH (`syncSshHosts`, inkl. 1-Klick-Erkennung) ohne Chat-Inhalte zusammenführen; mit Gerätefilter, „Nutzung nach Gerät“-Diagramm, Agent-Prompt-Kopie, `scripts/sync.mjs` und [SYNC_AGENT.md](./SYNC_AGENT.md) |
 | Kontextziel (Experimentell) | `Standard` | Auswahl von `Standard`, `256K`, `500K` oder `1M` (`Standard` belässt die nativen Einstellungen unverändert) |
 
 ### Umgebungsvariablen & Pfade
@@ -214,6 +215,8 @@ Alle Einstellungen greifen sofort unter **Powertools -> Einstellungen** und werd
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | Benutzerdefiniertes Antigravity-Benutzerdatenverzeichnis für isolierte Profile |
 | `ANTIGRAVITY_CLI_DATA_DIR` | Benutzerdefiniertes `agy`-CLI-Datenverzeichnis (Standard: `~/.gemini/antigravity-cli`) |
+| `AGY_POWERTOOLS_SYNC_DIR` | Standard-Freigabeordner für den Multi-Geräte-Nutzungssync |
+| `AGY_POWERTOOLS_DEVICE_NAME` | Standard-Gerätename in Multi-Geräte-Filtern |
 | `ANTIGRAVITY_CDP_PORT_FILE` | Expliziter Pfad zu `DevToolsActivePort` (berücksichtigt auch `AGY_BROWSER_ACTIVE_PORT_FILE`) |
 | `~/.gemini/config/plugins/agy-powertools/` | Installierte Plugin-Dateien und Laufzeitskripte |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | Gespeicherte Einstellungen, Kontometadaten, Kontingent-Stichproben und Preis-Cache |

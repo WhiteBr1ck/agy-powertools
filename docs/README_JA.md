@@ -206,6 +206,7 @@ sh ./install.sh
 | 貼り付けた SSH コマンドを認識 | オン | 「新しいプロジェクト -> SSH ホスト」に `ssh -p PORT user@host` を貼り付けた際、`user@host:port` を抽出します（付随パスワードは破棄） |
 | マルチアカウント切り替えを有効化 | オフ | リスク確認のうえ有効化。サイドバー切り替え、リスト / カード表示、5時間 / 週間切替、自動切り替えに対応 |
 | アプリ専用プロキシ（非 TUN） | オフ | プロトコル / ホスト / ポート設定、接続テスト、コールドスタート案内、HTTP/1.1 強制 |
+| マルチデバイス使用量同期 | オフ | 共有フォルダ（`syncDir`）や SSH（`syncSshHosts`、検出ホストのワンクリック切替対応）経由で複数デバイスの使用統計を統合し、会話本文は同期しません。デバイス別フィルタとドーナツグラフ、Agent 用プロンプトコピー、`scripts/sync.mjs`、[SYNC_AGENT.md](./SYNC_AGENT.md) を搭載 |
 | コンテキスト目標（実験的） | `デフォルト` | `デフォルト`、`256K`、`500K`、`1M` から選択します（`デフォルト` では標準設定を変更しません） |
 
 ### 環境変数とパス
@@ -214,6 +215,8 @@ sh ./install.sh
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | 分離プロファイル用のカスタム Antigravity ユーザーデータディレクトリ |
 | `ANTIGRAVITY_CLI_DATA_DIR` | カスタム `agy` CLI データディレクトリ（既定: `~/.gemini/antigravity-cli`） |
+| `AGY_POWERTOOLS_SYNC_DIR` | マルチデバイス使用量同期の既定共有フォルダパス |
+| `AGY_POWERTOOLS_DEVICE_NAME` | デバイスフィルタに表示される既定デバイス名 |
 | `ANTIGRAVITY_CDP_PORT_FILE` | `DevToolsActivePort` の明示パス（`AGY_BROWSER_ACTIVE_PORT_FILE` も参照） |
 | `~/.gemini/config/plugins/agy-powertools/` | インストール済みプラグイン本体およびランタイムスクリプト |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | 保存済み設定、アカウントメタデータ、クォータサンプル、料金キャッシュ |

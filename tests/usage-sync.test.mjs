@@ -12,6 +12,7 @@ import {
   buildPeerSnapshot,
   createUsageSyncCoordinator,
   ensureDeviceIdentity,
+  formatSyncWriteError,
   preparePeerRequests,
   readPeerSnapshots,
   SYNC_FORMAT,
@@ -436,4 +437,76 @@ test('summarizeDevices and distributionDevices aggregate usage by device and gro
   assert.equal(dist[5].tokens, 80);
   assert.equal(dist[5].requests, 1);
   assert.ok(Math.abs(dist[5].cost - 0.02) < 1e-9);
+  assert.equal(stats[0].cacheHitPercent, 66.7);
 });
+
+test('formatSyncWriteError, mergedDashboard single-account fallbackEmail, and in-memory export cache work', () => {
+  assert.match(formatSyncWriteError({ code: 'EPERM', message: 'raw eperm' }, 'Y:\\antigravity-sync'), /read-only/i);
+  assert.match(formatSyncWriteError({ code: 'ENOENT', message: 'missing' }, 'Y:\\antigravity-sync'), /unavailable/i);
+
+  const root = mkdtempSync(join(tmpdir(), 'agy-sync-cache-'));
+  try {
+    const syncDir = join(root, 'shared');
+    const dataDir = join(root, 'plugin-data');
+    const appDataDir = join(root, 'app-data');
+    mkdirSync(syncDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(appDataDir, { recursive: true });
+
+    seedConversationDb(appDataDir, 'conv-local', {
+      requestId: 'req-local-1',
+      model: 'MODEL_PLACEHOLDER_M47',
+      inTok: 400,
+      cacheTok: 600,
+      outTok: 200,
+      sec: Math.floor(Date.now() / 1000) - 120
+    });
+
+    const settings = createSettingsStore(dataDir);
+    settings.set({ syncEnabled: true, syncDir, syncDeviceName: 'Cache-PC' });
+    const quota = createQuotaTracker(dataDir);
+    const coordinator = createUsageSyncCoordinator({
+      dataDir,
+      appDataDirGetter: () => appDataDir,
+      settingsGetter: () => settings.get(),
+      quotaTracker: quota,
+      env: {},
+      home: root
+    });
+
+    const merged = coordinator.mergedDashboard({
+      force: true,
+      activeEmail: 'solo@example.com',
+      multiAccount: false,
+      knownAccountCount: 1
+    });
+    assert.equal(merged.syncStatus.lastError, '');
+
+    const identity = coordinator.identity();
+    const snapPath = join(syncDir, `device-${identity.deviceId}.json`);
+    const snap1 = JSON.parse(readFileSync(snapPath, 'utf8'));
+    assert.equal(snap1.requests.length, 1);
+    assert.equal(snap1.requests[0].accountEmail, 'solo@example.com');
+
+    // Remove exported file on disk and verify passive mergedDashboard hits in-memory contentSig cache without rewriting
+    rmSync(snapPath);
+    coordinator.mergedDashboard({
+      force: false,
+      activeEmail: 'solo@example.com',
+      multiAccount: false,
+      knownAccountCount: 1
+    });
+    assert.equal(statSafeExists(snapPath), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function statSafeExists(target) {
+  try {
+    statSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}

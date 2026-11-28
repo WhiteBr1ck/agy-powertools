@@ -24,7 +24,47 @@ For Antigravity, Codex, and other local coding agents. Configures Agy Powertools
    - Add `--email "<ACCOUNT_EMAIL>"` on headless CLI-only hosts that do not run the Desktop client.
 2. Verify the output JSON from `sync.mjs status --json` (or `init --json`):
    - Confirm `status.enabled === true`, `status.deviceId`, `status.deviceName`, `status.peers`, `localRequestCount`, and `totalMergedRequests`.
+   - Once synced, **Powertools -> Overview** shows a device filter, a **Usage by device** donut card, and a device column badge in **Requests**.
 3. Never force-close Antigravity and never modify other plugins, credentials, or chat history.
+
+## Headless NAS, Custom `.gemini`, and Direct JSON Exporters
+
+- **Shared folder permissions**: if an SMB share is temporarily read-only on a workstation, Powertools still reads remote `device-*.json` files and reports `Sync folder is read-only (peer reading still active)`. Switch the share to Read/Write so every workstation can also publish its own snapshot.
+- **Custom CLI data path**: if `agy` CLI lives outside `$HOME/.gemini` (e.g., `/DATA/AppData/antigravity/.gemini` on a NAS), set `HOME=/DATA/AppData/antigravity` or `ANTIGRAVITY_CLI_DATA_DIR=/DATA/AppData/antigravity/.gemini/antigravity-cli`.
+- **Hosts without Node.js >= 22.13**: any cron script can write an atomic `device-<id>.json` into the shared folder using format `agy-powertools-usage-sync` v1 (last 90 days, max 20,000 requests, sorted by `timestampMs` desc):
+  ```json
+  {
+    "format": "agy-powertools-usage-sync",
+    "schemaVersion": 1,
+    "kind": "device",
+    "deviceId": "my-nas",
+    "deviceName": "My-NAS",
+    "privacyMode": false,
+    "updatedAtMs": 1795855000000,
+    "requests": [
+      {
+        "id": "<conversationId>-<stepIndex>",
+        "conversationId": "<conversationId>",
+        "stepIndex": 1,
+        "timestampMs": 1795854900000,
+        "model": "Gemini 4 Hydrogen (High)",
+        "inputTokens": 1000,
+        "cacheReadTokens": 9000,
+        "outputTokens": 500,
+        "cacheHitPercent": 90,
+        "tps": 180.5,
+        "tpsMode": "stream",
+        "status": "success",
+        "error": "",
+        "retries": 0,
+        "retryErrors": [],
+        "accountEmail": "user@example.com",
+        "deviceId": "my-nas",
+        "deviceName": "My-NAS"
+      }
+    ]
+  }
+  ```
 
 ## Copyable Prompts
 

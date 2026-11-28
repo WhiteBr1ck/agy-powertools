@@ -209,6 +209,7 @@ Mọi thiết lập áp dụng trực tiếp trong **Powertools -> Cài đặt**
 | Nhận diện lệnh SSH khi dán | Bật | Tự trích xuất `user@host:port` khi dán `ssh -p PORT user@host` vào ô SSH Host (tự loại bỏ mật khẩu đi kèm) |
 | Bật chuyển đổi nhiều tài khoản | Tắt | Cần chủ động bật kèm cảnh báo rủi ro; bộ chuyển ở thanh bên, dạng danh sách/thẻ, xem 5H/tuần và tự chuyển tài khoản |
 | Proxy cho ứng dụng (không cần TUN) | Tắt | Nhập giao thức/host/port, kiểm tra kết nối, nhắc khi cold-start và ép HTTP/1.1 |
+| Đồng bộ mức dùng đa thiết bị | Tắt | Gộp thống kê sử dụng giữa các thiết bị qua thư mục dùng chung (`syncDir`) hoặc SSH (`syncSshHosts`, hỗ trợ bật/tắt 1 chạm host phát hiện sẵn) mà không đồng bộ nội dung chat; gồm bộ lọc và biểu đồ theo thiết bị, sao chép prompt cho Agent, `scripts/sync.mjs` và [SYNC_AGENT.md](./SYNC_AGENT.md) |
 | Khởi chạy trực tiếp macOS | Tắt | Chỉ hiện trên macOS: tạo/hiển thị trong Finder/xóa `~/Applications/Antigravity (Powertools).app` và sao chép lệnh khởi chạy |
 | Mục tiêu Context (Thử nghiệm) | `Mặc định` | Chọn `Mặc định`, `256K`, `500K` hoặc `1M` (`Mặc định` giữ nguyên thiết lập gốc) |
 
@@ -218,6 +219,8 @@ Mọi thiết lập áp dụng trực tiếp trong **Powertools -> Cài đặt**
 | --- | --- |
 | `ANTIGRAVITY_USER_DATA_DIR` | Thư mục dữ liệu người dùng Antigravity tùy chỉnh cho profile tách biệt |
 | `ANTIGRAVITY_CLI_DATA_DIR` | Thư mục dữ liệu `agy` CLI tùy chỉnh (mặc định `~/.gemini/antigravity-cli`) |
+| `AGY_POWERTOOLS_SYNC_DIR` | Thư mục dùng chung mặc định cho đồng bộ mức dùng đa thiết bị |
+| `AGY_POWERTOOLS_DEVICE_NAME` | Tên thiết bị mặc định hiển thị trong bộ lọc đa thiết bị |
 | `ANTIGRAVITY_CDP_PORT_FILE` | Đường dẫn chỉ định tới `DevToolsActivePort` (cũng hỗ trợ `AGY_BROWSER_ACTIVE_PORT_FILE`) |
 | `~/.gemini/config/plugins/agy-powertools/` | Thư mục chứa tệp plugin và script thực thi đã cài |
 | `~/.gemini/antigravity/plugin_data/agy-powertools/` | Dữ liệu cài đặt đã lưu, metadata tài khoản, mẫu Quota và bộ nhớ đệm bảng giá |
